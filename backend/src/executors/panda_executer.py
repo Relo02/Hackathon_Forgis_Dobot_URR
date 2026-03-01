@@ -161,6 +161,33 @@ class PandaExecutor(Executor):
         logger.info("PandaExecutor: Closing gripper")
         self._node.close_gripper()
 
+    async def grasp(
+        self,
+        width: float = 0.0,
+        speed: float = 0.02,
+        force: float = 20.0,
+        epsilon_outer: float = 1.0,
+    ) -> bool:
+        """Grasp an object at a specific width with configurable force.
+
+        Args:
+            width: Target grasp width in metres (distance between fingers).
+            speed: Gripper closing speed in m/s.
+            force: Grasping force in Newtons.
+            epsilon_outer: Outer tolerance for grasp detection.
+
+        Returns:
+            True if grasp succeeded, False otherwise.
+        """
+        logger.info(
+            "PandaExecutor: Grasping (width=%.3fm, speed=%.3fm/s, force=%.1fN)",
+            width, speed, force,
+        )
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None, self._node.grasp, width, speed, force, epsilon_outer
+        )
+
     async def reset_joints(self) -> None:
         """Blocking move to the canonical home configuration."""
         logger.info("PandaExecutor: Resetting to home position")
