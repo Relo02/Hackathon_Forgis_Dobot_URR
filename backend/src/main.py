@@ -94,9 +94,11 @@ def main():
     # FastAPI application
     app = create_app(flow_manager, ws_manager, robot, camera_executor, io_robot_executor, hand_executor)
 
-    # ROS 2 executor with nodes
+    # ROS 2 executor with nodes.
+    # PandaNode is not an rclpy Node — skip adding it.
     ros_executor = MultiThreadedExecutor()
-    ros_executor.add_node(robot)
+    if robot_type != "panda":
+        ros_executor.add_node(robot)
     ros_executor.add_node(camera)
     ros_executor.add_node(camera_bridge)
     ros_executor.add_node(hand)
@@ -125,7 +127,8 @@ def main():
     finally:
         logger.info("Shutting down...")
         ros_executor.shutdown()
-        robot.destroy_node()
+        if robot_type != "panda":
+            robot.destroy_node()
         camera.destroy_node()
         camera_bridge.destroy_node()
         hand.destroy_node()

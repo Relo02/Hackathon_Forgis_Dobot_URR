@@ -23,10 +23,13 @@ class PandaExecutor(Executor):
     """
 
     executor_type = "robot"
+    
 
     def __init__(self, node: "PandaNode"):
         self._node = node
         self._motion_poll_interval = 0.1  # seconds
+        self.get_logger().info("PandaNode initialized")
+
 
     async def initialize(self) -> None:
         """Wait for Panda connection."""
