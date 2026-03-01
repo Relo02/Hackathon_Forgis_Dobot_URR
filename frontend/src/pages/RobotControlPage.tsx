@@ -3,7 +3,6 @@ import { TopBar } from "@/components/layout/Topbar";
 import { CoderSidebar } from "@/components/chat/CoderSidebar";
 import { FlowCanvas } from "@/components/flow/FlowCanvas";
 import { CameraFeed } from "@/components/camera/CameraFeed";
-import { DevicesSidebar } from "@/components/devices/DevicesSidebar";
 import {
   Breadcrumb,
   BreadcrumbList,
@@ -18,12 +17,12 @@ import { useFlowExecution } from "@/hooks/useFlowExecution";
 import type { SelectedStep } from "@/types";
 
 export function RobotControlPage() {
-  const { flow, messages, loading, sendMessage, updateStepParams } = useFlowGeneration();
+  const { flow, messages, loading, sendMessage } = useFlowGeneration();
   const { cameraFrame, lastLabel, bboxOverlay, callbacks: cameraCallbacks } = useCamera();
   const { flowStatus, nodeStates, finishing, startFlow, pauseFlow, resumeFlow, finishFlow, resetFlow } = useFlowExecution(flow, cameraCallbacks);
 
-  const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
-  const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
+  const [_selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
+  const [_nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-background">
@@ -52,28 +51,8 @@ export function RobotControlPage() {
         </Breadcrumb>
       </div>
       <div className="flex flex-1 overflow-hidden">
-        {/* Left sidebar - Devices (idle) or Camera Feed (active) */}
-        {flowStatus === "idle" ? (
-          <DevicesSidebar
-            selectedStep={selectedStep}
-            onDeselectStep={() => setSelectedStep(null)}
-            onParamChange={(nodeId, stepId, key, value) => {
-              updateStepParams(nodeId, stepId, {
-                ...selectedStep?.step.params,
-                [key]: value,
-              });
-              setSelectedStep((prev) =>
-                prev
-                  ? { ...prev, step: { ...prev.step, params: { ...prev.step.params, [key]: value } } }
-                  : prev
-              );
-            }}
-            nodeCreatorOpen={nodeCreatorOpen}
-            onCloseNodeCreator={() => setNodeCreatorOpen(false)}
-          />
-        ) : (
-          <CameraFeed frameUrl={cameraFrame} streaming lastLabel={lastLabel} bboxOverlay={bboxOverlay} />
-        )}
+        {/* Left sidebar - Camera Feed always visible */}
+        <CameraFeed frameUrl={cameraFrame} streaming lastLabel={lastLabel} bboxOverlay={bboxOverlay} />
 
         {/* Main content area - Flow canvas always visible */}
         <div className="flex flex-1 min-h-0 overflow-hidden p-5 bg-[var(--panel)]">

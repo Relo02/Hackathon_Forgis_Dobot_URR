@@ -64,6 +64,7 @@ services:
       - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY:-}
       - AZURE_OPENAI_API_VERSION=${AZURE_OPENAI_API_VERSION:-2024-02-15-preview}
       - AZURE_OPENAI_DEPLOYMENT=${AZURE_OPENAI_DEPLOYMENT:-gpt-4o}
+      - CAMERA_BRIDGE_HOST=${CAMERA_BRIDGE_HOST:-localhost}
     env_file: .env
     volumes:
       - ./backend/src/data/flow:/app/flows  # Persist flow definitions

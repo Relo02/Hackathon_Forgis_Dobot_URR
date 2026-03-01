@@ -139,11 +139,31 @@ async def get_camera_state():
 _GEAR_CLASSES = {"gear1", "gear2", "gear3", "gear4", "gear5"}
 
 
+def _is_valid_gear_box(x1: int, y1: int, x2: int, y2: int, frame_w: int, frame_h: int) -> bool:
+    """
+    Reject obvious false positives using geometry:
+      - box area must be 2%–50% of the frame (tiny clips and full-frame boxes are noise)
+      - aspect ratio must be between 0.3 and 3.0 (gears are roughly circular)
+    """
+    bw, bh = x2 - x1, y2 - y1
+    if bw <= 0 or bh <= 0:
+        return False
+    area_frac = (bw * bh) / (frame_w * frame_h)
+    if area_frac < 0.02 or area_frac > 0.50:
+        return False
+    aspect = bw / bh
+    if aspect < 0.3 or aspect > 3.0:
+        return False
+    return True
+
+
 async def _detection_frame_generator(
     executor, conf: float, fps: int
 ) -> AsyncGenerator[bytes, None]:
     """Yield MJPEG boundary frames with YOLO detections drawn."""
-    model = executor._get_yolo_model()
+    # Load model in thread pool so we don't block the event loop on cold start
+    loop = asyncio.get_event_loop()
+    model = await loop.run_in_executor(None, executor._get_yolo_model)
     interval = 1.0 / fps
     colour_gear = (56, 255, 56)   # green
     colour_other = (255, 200, 0)  # cyan-ish
@@ -165,6 +185,7 @@ async def _detection_frame_generator(
         out = frame.copy()
         h, w = out.shape[:2]
 
+        any_gear = False
         for result in results:
             for box in result.boxes:
                 cls_name = model.names[int(box.cls)]
@@ -172,7 +193,10 @@ async def _detection_frame_generator(
                     continue
                 box_conf = float(box.conf)
                 x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                if not _is_valid_gear_box(x1, y1, x2, y2, w, h):
+                    continue
                 cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
+                any_gear = True
 
                 cv2.rectangle(out, (x1, y1), (x2, y2), colour_gear, 2)
                 cv2.drawMarker(out, (cx, cy), colour_gear, cv2.MARKER_CROSS, 18, 2)
@@ -182,13 +206,6 @@ async def _detection_frame_generator(
                 cv2.rectangle(out, (x1, y1 - th - 8), (x1 + tw + 6, y1), colour_gear, cv2.FILLED)
                 cv2.putText(out, label, (x1 + 3, y1 - 4),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 0), 1, cv2.LINE_AA)
-
-        # Status bar
-        any_gear = any(
-            model.names[int(b.cls)] in _GEAR_CLASSES
-            for r in results for b in r.boxes
-            if float(b.conf) >= conf
-        )
         status_text = "GEAR DETECTED" if any_gear else "NO GEAR"
         status_colour = (56, 255, 56) if any_gear else (56, 56, 255)
         cv2.rectangle(out, (0, 0), (w, 28), (30, 30, 30), cv2.FILLED)
@@ -207,6 +224,43 @@ async def _detection_frame_generator(
 
         elapsed = asyncio.get_event_loop().time() - t_start
         await asyncio.sleep(max(0.0, interval - elapsed))
+
+
+@router.get("/stream/raw")
+async def raw_stream(
+    fps: int = Query(default=15, ge=1, le=30, description="Target FPS"),
+):
+    """
+    Plain MJPEG stream — no detection overlay.
+    Open directly in a browser: http://localhost:8000/api/camera/stream/raw
+    """
+    executor = get_executor()
+
+    if not executor.is_ready():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Camera not connected",
+        )
+
+    async def _raw_generator():
+        interval = 1.0 / fps
+        while True:
+            t_start = asyncio.get_event_loop().time()
+            jpeg = executor._camera.get_frame_jpeg(quality=80)
+            if jpeg:
+                yield (
+                    b"--frame\r\n"
+                    b"Content-Type: image/jpeg\r\n\r\n"
+                    + jpeg
+                    + b"\r\n"
+                )
+            elapsed = asyncio.get_event_loop().time() - t_start
+            await asyncio.sleep(max(0.0, interval - elapsed))
+
+    return StreamingResponse(
+        _raw_generator(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+    )
 
 
 @router.get("/stream/detection")

@@ -14,7 +14,7 @@ interface CameraFeedProps {
   bboxOverlay?: BoundingBoxOverlay | null;
 }
 
-export function CameraFeed({ frameUrl, streaming, lastLabel, bboxOverlay }: CameraFeedProps) {
+export function CameraFeed({ frameUrl: _frameUrl, streaming: _streaming, lastLabel, bboxOverlay }: CameraFeedProps) {
   const zoneLabels = ZONE_LABELS_V2;
   const [collapsed, setCollapsed] = useState(false);
   const [latestDetection, setLatestDetection] = useState<LatestDetection | null>(null);
@@ -78,7 +78,7 @@ const imgRef = useRef<HTMLImageElement>(null);
     updateRect();
     window.addEventListener("resize", updateRect);
     return () => window.removeEventListener("resize", updateRect);
-  }, [frameUrl]);
+  }, []);
 
   // Calculate bbox overlay position scaled to displayed image
   const getBboxStyle = () => {
@@ -129,38 +129,28 @@ const imgRef = useRef<HTMLImageElement>(null);
 
           {/* Image container */}
           <div className="relative bg-[var(--platinum)] rounded-[8px] aspect-video overflow-hidden shrink-0">
-            {streaming && frameUrl ? (
-              <>
-                <img
-                  ref={imgRef}
-                  src={frameUrl}
-                  alt="Camera stream"
-                  className="absolute inset-0 w-full h-full object-cover"
-                  onLoad={() => {
-                    if (imgRef.current) {
-                      const rect = imgRef.current.getBoundingClientRect();
-                      const parent = imgRef.current.parentElement?.getBoundingClientRect();
-                      if (parent) {
-                        setImgRect({
-                          width: rect.width,
-                          height: rect.height,
-                          left: rect.left - parent.left,
-                          top: rect.top - parent.top,
-                        });
-                      }
-                    }
-                  }}
-                />
-                {bboxStyle && bboxOverlay && (
-                  <BboxOverlay bboxStyle={bboxStyle} overlay={bboxOverlay} />
-                )}
-              </>
-            ) : (
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-[var(--gunmetal-50)] forgis-text-reading font-forgis-body">
-                  Waiting for stream...
-                </span>
-              </div>
+            <img
+              ref={imgRef}
+              src="/api/camera/stream/detection"
+              alt="Camera stream"
+              className="absolute inset-0 w-full h-full object-cover"
+              onLoad={() => {
+                if (imgRef.current) {
+                  const rect = imgRef.current.getBoundingClientRect();
+                  const parent = imgRef.current.parentElement?.getBoundingClientRect();
+                  if (parent) {
+                    setImgRect({
+                      width: rect.width,
+                      height: rect.height,
+                      left: rect.left - parent.left,
+                      top: rect.top - parent.top,
+                    });
+                  }
+                }
+              }}
+            />
+            {bboxStyle && bboxOverlay && (
+              <BboxOverlay bboxStyle={bboxStyle} overlay={bboxOverlay} />
             )}
           </div>
 

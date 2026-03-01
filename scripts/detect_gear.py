@@ -29,6 +29,18 @@ CONF_THRESHOLD = float(os.environ.get("CONF_THRESHOLD", "0.03"))
 GEAR_CLASSES = {"gear1", "gear2", "gear3", "gear4", "gear5"}
 
 
+def _is_valid_gear_box(x1, y1, x2, y2, frame_w, frame_h) -> bool:
+    """Reject false positives: too small, too large, or wrong aspect ratio."""
+    bw, bh = x2 - x1, y2 - y1
+    if bw <= 0 or bh <= 0:
+        return False
+    area_frac = (bw * bh) / (frame_w * frame_h)
+    if area_frac < 0.02 or area_frac > 0.50:
+        return False
+    aspect = bw / bh
+    return 0.3 <= aspect <= 3.0
+
+
 def fetch_snapshot() -> np.ndarray:
     with urllib.request.urlopen(SNAPSHOT_URL, timeout=10) as r:
         data = r.read()
@@ -49,6 +61,7 @@ def detect_gear(frame: np.ndarray, model: YOLO) -> dict:
             "bbox_px": (x1,y1,x2,y2) # pixel bounding box
         }
     """
+    h, w = frame.shape[:2]
     results = model(frame, verbose=False)
 
     best = None
@@ -58,8 +71,10 @@ def detect_gear(frame: np.ndarray, model: YOLO) -> dict:
             conf     = float(box.conf)
             if cls_name not in GEAR_CLASSES or conf < CONF_THRESHOLD:
                 continue
+            x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+            if not _is_valid_gear_box(x1, y1, x2, y2, w, h):
+                continue
             if best is None or conf > best["confidence"]:
-                x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
                 best = {
                     "gear_found":  True,
                     "confidence":  conf,
