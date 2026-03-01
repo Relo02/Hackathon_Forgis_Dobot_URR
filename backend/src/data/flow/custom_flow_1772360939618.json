@@ -1,0 +1,108 @@
+{
+  "id": "custom_flow_1772360939618",
+  "name": "Custom Motion Flow",
+  "initial_state": "linear_move_9618",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "linear_move_9618",
+      "steps": [
+        {
+          "id": "linear_move_linear_39618",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.03,
+            "velocity": 0.07
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "grasping_7623",
+      "steps": [
+        {
+          "id": "grasping_grasp_67623",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 0,
+            "speed": 0.02,
+            "force": 20
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 15000
+        }
+      ]
+    },
+    {
+      "name": "linear_move_5034",
+      "steps": [
+        {
+          "id": "linear_move_linear_75034",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0,
+              0.1,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.03,
+            "velocity": 0.07
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "linear_move_9618",
+      "to_state": "grasping_7623",
+      "condition": null
+    },
+    {
+      "type": "sequential",
+      "from_state": "grasping_7623",
+      "to_state": "linear_move_5034",
+      "condition": null
+    }
+  ]
+}

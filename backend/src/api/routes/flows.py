@@ -1,12 +1,16 @@
 """REST endpoints for flow management."""
 
+import json
 import logging
+import os
+import re
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
+from google import genai
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from flow import FlowSchema, FlowStatusResponse
 
@@ -76,6 +80,9 @@ class FlowStep(BaseModel):
     skill: str
     executor: str
     params: Optional[dict[str, Any]] = None
+    store_result: Optional[str] = None
+    error_handling: Optional[dict[str, Any]] = None
+    timeout_ms: Optional[int] = None
 
 
 class FlowNode(BaseModel):
@@ -105,6 +112,7 @@ class FlowGenerateResponse(BaseModel):
     id: str
     name: str
     loop: bool = False
+    variables: dict[str, Any] = Field(default_factory=dict)
     nodes: list[FlowNode]
     edges: list[FlowEdge]
 
@@ -142,6 +150,9 @@ def convert_backend_to_frontend(flow: FlowSchema) -> FlowGenerateResponse:
                 skill=step.skill,
                 executor=step.executor,
                 params=step.params,
+                store_result=step.store_result,
+                error_handling=step.error_handling.model_dump(),
+                timeout_ms=step.timeout_ms,
             )
             for step in state.steps
         ]
@@ -206,6 +217,7 @@ def convert_backend_to_frontend(flow: FlowSchema) -> FlowGenerateResponse:
         id=flow.id,
         name=flow.name,
         loop=flow.loop,
+        variables=flow.variables,
         nodes=nodes,
         edges=edges,
     )
@@ -358,28 +370,171 @@ async def resume_flow():
     return FlowResumeResponse(success=True, message=message)
 
 
-# Default flow loaded when no AI generation is implemented.
-# Hackathon challenge: replace this endpoint with real LLM-based flow generation.
-_DEFAULT_FLOW_ID = "dobot_test_pick"
+_GEMINI_MODEL = "gemini-3-flash-preview"
+
+_FLOW_SYSTEM_PROMPT_TEMPLATE = """\
+You are a robot flow generator. Given a natural-language task description, produce a JSON object that conforms EXACTLY to the FlowSchema below. Return ONLY raw JSON — no markdown fences, no explanation.
+
+## FlowSchema
+{
+  "id": "<snake_case_id>",
+  "name": "<Human Readable Name>",
+  "initial_state": "<name of first state>",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "<unique_state_name>",
+      "steps": [
+        {
+          "id": "<unique_step_id>",
+          "skill": "<skill_name>",
+          "executor": "<executor_type>",
+          "params": { ... },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    { "type": "sequential", "from_state": "<state_a>", "to_state": "<state_b>" }
+  ]
+}
+
+## Available Skills
+
+Robot executor ("executor": "robot"):
+- move_joint: params {"target_joints_deg": [j1, j2, ..., j__JOINT_COUNT__]} — exactly __JOINT_COUNT__ joint angles in degrees for the current robot
+- move_linear: params {"target_pose": [x, y, z, rx, ry, rz]} — Cartesian pose (metres + radians)
+- grasp: params {"width": w, "speed": s, "force": f} — grasp an object at width w (metres)
+- release: params {"speed": s} — open the gripper to release the current object
+
+Camera executor ("executor": "camera"):
+- get_label: params {"prompt": "<what to read>", "use_bbox": false}
+- get_bounding_box: params {"prompt": "<what to detect>"}
+- start_streaming: params {}
+- stop_streaming: params {}
+
+## Rules
+- Every state referenced in transitions must exist in the states array.
+- initial_state must match the name of the first state.
+- Use sequential transitions for linear flows. Use conditional transitions (type "conditional", add "condition" field) only when the prompt implies branching.
+- Use placeholder joint values [__JOINT_PLACEHOLDER__] when exact positions are unknown — the user will fill them in.
+- Step ids must be unique across the entire flow.
+- Keep flows concise: only add states that the prompt requires.
+"""
+
+
+def _get_expected_joint_count() -> int:
+    """Return the joint count for the configured robot type."""
+    robot_type = os.environ.get("ROBOT_TYPE", "panda").lower()
+    return 7 if robot_type == "panda" else 6
+
+
+def _build_flow_system_prompt() -> str:
+    """Build the Gemini system prompt with the active robot joint count."""
+    joint_count = _get_expected_joint_count()
+    joint_placeholder = ",".join(["0"] * joint_count)
+    return (
+        _FLOW_SYSTEM_PROMPT_TEMPLATE
+        .replace("__JOINT_COUNT__", str(joint_count))
+        .replace("__JOINT_PLACEHOLDER__", joint_placeholder)
+    )
+
+
+def _normalize_generated_flow(flow_dict: dict[str, Any]) -> dict[str, Any]:
+    """Normalize LLM-generated joint targets to the current robot's joint count."""
+    expected_joint_count = _get_expected_joint_count()
+
+    for state in flow_dict.get("states", []):
+        if not isinstance(state, dict):
+            continue
+        for step in state.get("steps", []):
+            if not isinstance(step, dict) or step.get("skill") != "move_joint":
+                continue
+
+            params = step.get("params")
+            if not isinstance(params, dict):
+                continue
+
+            target_joints = params.get("target_joints_deg")
+            if not isinstance(target_joints, list):
+                continue
+
+            normalized_joints = list(target_joints[:expected_joint_count])
+            if len(normalized_joints) < expected_joint_count:
+                normalized_joints.extend([0] * (expected_joint_count - len(normalized_joints)))
+            params["target_joints_deg"] = normalized_joints
+
+    return flow_dict
+
+
+def _get_gemini_client() -> genai.Client:
+    """Create a Gemini client from the API key env var."""
+    # Try loading .env if python-dotenv is available (for non-Docker runs)
+    try:
+        from dotenv import load_dotenv
+        load_dotenv()
+    except ImportError:
+        pass
+
+    api_key = os.environ.get("GEMINI_API_KEY", "")
+    if not api_key:
+        print("[ERROR] GEMINI_API_KEY is not set in environment or .env")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="GEMINI_API_KEY environment variable is not set",
+        )
+    print(f"[DEBUG] GEMINI_API_KEY loaded (first 8 chars): {api_key[:8]}...")
+    return genai.Client(api_key=api_key)
+
+
+def _extract_json(text: str) -> str:
+    """Strip optional markdown fences from LLM output."""
+    match = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
+    if match:
+        return match.group(1).strip()
+    return text.strip()
 
 
 @router.post("/generate", response_model=FlowGenerateResponse)
 async def generate_flow(request: FlowGenerateRequest):
-    """
-    Load and return the default flow definition.
+    """Generate a flow from a natural-language prompt using Gemini."""
+    logger.info("generate_flow called with prompt: %r", request.prompt)
 
-    TODO (hackathon): Implement AI-based flow generation from the natural
-    language prompt in `request.prompt`. The response must conform to
-    FlowGenerateResponse (nodes + edges in frontend format).
-    """
-    logger.debug("generate_flow called with prompt: %r", request.prompt)
-    manager = get_manager()
+    client = _get_gemini_client()
 
-    flow = manager.get_flow(_DEFAULT_FLOW_ID)
-    if flow is None:
+    try:
+        response = client.models.generate_content(
+            model=_GEMINI_MODEL,
+            contents=request.prompt,
+            config={"system_instruction": _build_flow_system_prompt()},
+        )
+        raw_text = response.text
+        print("Gemini raw response:", raw_text)
+    except Exception as exc:
+        logger.error("Gemini API call failed: %s", exc)
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Default flow '{_DEFAULT_FLOW_ID}' not found",
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Gemini API error: {exc}",
+        )
+
+    try:
+        flow_dict = _normalize_generated_flow(json.loads(_extract_json(raw_text)))
+        flow = FlowSchema(**flow_dict)
+    except (json.JSONDecodeError, Exception) as exc:
+        logger.error("Failed to parse Gemini response: %s\nRaw: %s", exc, raw_text)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not parse generated flow: {exc}",
+        )
+
+    valid, error = flow.validate_flow()
+    if not valid:
+        logger.error("Generated flow failed validation: %s", error)
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Generated flow is invalid: {error}",
         )
 
     return convert_backend_to_frontend(flow)

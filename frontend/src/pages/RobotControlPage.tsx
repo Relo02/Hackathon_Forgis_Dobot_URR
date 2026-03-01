@@ -15,12 +15,28 @@ import {
 import { useFlowGeneration } from "@/hooks/useFlowGeneration";
 import { useCamera } from "@/hooks/useCamera";
 import { useFlowExecution } from "@/hooks/useFlowExecution";
+import { useRobotState } from "@/hooks/useRobotState";
 import type { SelectedStep } from "@/types";
+import type { StationMetric } from "@/components/camera/StationMap";
+
+function toNumericParam(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
 
 export function RobotControlPage() {
-  const { flow, messages, loading, sendMessage, updateStepParams } = useFlowGeneration();
-  const { cameraFrame, lastLabel, bboxOverlay, callbacks: cameraCallbacks } = useCamera();
-  const { flowStatus, nodeStates, finishing, startFlow, pauseFlow, resumeFlow, finishFlow, resetFlow } = useFlowExecution(flow, cameraCallbacks);
+  const { flow, messages, loading, sendMessage, updateStepParams, addNode } = useFlowGeneration();
+  const { cameraFrame, lastLabel, lastGrasp, bboxOverlay, callbacks: cameraCallbacks } = useCamera();
+  const { robotState, robotStateError } = useRobotState();
+  const { flowStatus, nodeStates, finishing, errorLog, startFlow, pauseFlow, resumeFlow, finishFlow, resetFlow } = useFlowExecution(flow, cameraCallbacks);
+  const graspStep = flow?.nodes.flatMap((node) => node.steps ?? []).find((step) => step.skill === "grasp");
+  const flowUsesGrasping = !!graspStep;
+  const graspMetrics: StationMetric[] | undefined = graspStep
+    ? [
+        { key: "G1", label: "Width", value: toNumericParam(graspStep.params?.width, 0) },
+        { key: "G2", label: "Speed", value: toNumericParam(graspStep.params?.speed, 0) },
+        { key: "G3", label: "Force", value: toNumericParam(graspStep.params?.force, 0) },
+      ]
+    : undefined;
 
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
   const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
@@ -70,9 +86,23 @@ export function RobotControlPage() {
             }}
             nodeCreatorOpen={nodeCreatorOpen}
             onCloseNodeCreator={() => setNodeCreatorOpen(false)}
+            onCreateNode={(creator) => {
+              addNode(creator, robotState);
+              setNodeCreatorOpen(false);
+            }}
+            robotState={robotState}
+            robotStateError={robotStateError}
           />
         ) : (
-          <CameraFeed frameUrl={cameraFrame} streaming lastLabel={lastLabel} bboxOverlay={bboxOverlay} />
+          <CameraFeed
+            frameUrl={cameraFrame}
+            streaming
+            lastLabel={lastLabel}
+            lastGrasp={lastGrasp}
+            bboxOverlay={bboxOverlay}
+            commitCountsOnGrasp={flowUsesGrasping}
+            graspMetrics={graspMetrics}
+          />
         )}
 
         {/* Main content area - Flow canvas always visible */}
@@ -82,6 +112,7 @@ export function RobotControlPage() {
               flow={flow}
               flowStatus={flowStatus}
               nodeStates={nodeStates}
+              errorLog={errorLog}
               onStart={startFlow}
               onPause={pauseFlow}
               onResume={resumeFlow}

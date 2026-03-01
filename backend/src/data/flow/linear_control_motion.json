@@ -1,0 +1,38 @@
+{
+  "id": "linear_control_motion",
+  "name": "Linear Control Motion",
+  "initial_state": "linear_move_state",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "linear_move_state",
+      "steps": [
+        {
+          "id": "step_move_linear",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": []
+}

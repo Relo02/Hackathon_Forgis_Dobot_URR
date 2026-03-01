@@ -29,6 +29,14 @@ WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen
 
+# Install franky-control (Python bindings for libfranka) from pre-built wheels
+RUN apt-get update && apt-get install -y wget unzip && rm -rf /var/lib/apt/lists/* && \
+    wget -q -O /tmp/libfranka_wheels.zip \
+        "https://github.com/TimSchneider42/franky/releases/latest/download/libfranka_0-9-2_wheels.zip" && \
+    unzip -o /tmp/libfranka_wheels.zip -d /tmp/franky_wheels && \
+    uv pip install --no-index --find-links=/tmp/franky_wheels/dist franky-control && \
+    rm -rf /tmp/libfranka_wheels.zip /tmp/franky_wheels
+
 COPY src/ ./src/
 COPY scripts/ ./scripts/
 RUN sed -i 's/\r$//' scripts/*.sh && chmod +x scripts/*.sh

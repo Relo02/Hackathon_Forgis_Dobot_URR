@@ -1,0 +1,73 @@
+{
+  "id": "linear_then_joint_motion",
+  "name": "Linear then Joint Motion",
+  "initial_state": "linear_move_state",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "linear_move_state",
+      "steps": [
+        {
+          "id": "linear_step_1",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "joint_move_state",
+      "steps": [
+        {
+          "id": "joint_step_1",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "linear_move_state",
+      "to_state": "joint_move_state",
+      "condition": null
+    }
+  ]
+}

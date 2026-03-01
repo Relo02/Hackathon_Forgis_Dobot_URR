@@ -1,0 +1,73 @@
+{
+  "id": "moving_action",
+  "name": "Moving Action",
+  "initial_state": "move_to_start",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "move_to_start",
+      "steps": [
+        {
+          "id": "step_initial_joint_move",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "move_to_target",
+      "steps": [
+        {
+          "id": "step_linear_translation",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.5,
+              0,
+              0.5,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "move_to_start",
+      "to_state": "move_to_target",
+      "condition": null
+    }
+  ]
+}

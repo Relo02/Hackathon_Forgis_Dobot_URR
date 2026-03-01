@@ -98,7 +98,7 @@
           "skill": "move_joint",
           "executor": "robot",
           "params": {
-            "target_joints_deg": [-122.69, -109.26, -44.24, -112.69, 89.94, 118.72]
+            "target_joints_deg": [0.0, -0.5, 0.0, 0.2, 0.0, 0.5, 0.0]
           },
           "timeout_ms": 30000
         }

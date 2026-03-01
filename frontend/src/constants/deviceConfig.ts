@@ -26,10 +26,12 @@ export const STATUS_LABEL: Record<DeviceStatus, string> = {
 // ── Vendor brands per device type ────────────────────────────
 
 export const BRANDS: Record<DeviceType, string[]> = {
-  robot: ["Universal Robots", "ABB", "KUKA", "Fanuc", "Yaskawa", "Doosan"],
+  robot: ["Franka", "Universal Robots", "ABB", "KUKA", "Fanuc", "Yaskawa", "Doosan"],
   camera: ["Intel RealSense", "Cognex", "Keyence", "Basler", "Sick", "Allied Vision"],
   sensor: ["Sick", "Pepperl+Fuchs", "Banner Engineering", "ifm", "Balluff"],
 };
+
+export const PANDA_DEFAULT_IP = "192.168.15.33";
 
 // ── Default devices (pre-populated) ─────────────────────────
 
@@ -41,6 +43,14 @@ export const DEFAULT_DEVICES: Device[] = [
     type: "robot",
     status: "disconnected",
     ip: "192.168.0.101",
+  },
+  {
+    id: "robot-default",
+    name: "Panda",
+    vendor: "Franka",
+    type: "robot",
+    status: "disconnected",
+    ip: "192.168.15.33"
   },
   {
     id: "cam-default",

@@ -1,0 +1,68 @@
+{
+  "id": "move_forward_and_grasp",
+  "name": "Move Forward and Grasp",
+  "initial_state": "move_forward",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "move_forward",
+      "steps": [
+        {
+          "id": "move_linear_1",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "grasp_object",
+      "steps": [
+        {
+          "id": "grasp_1",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 0.5,
+            "speed": 0.05,
+            "force": 10
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "move_forward",
+      "to_state": "grasp_object",
+      "condition": null
+    }
+  ]
+}

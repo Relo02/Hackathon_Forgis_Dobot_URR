@@ -1,0 +1,63 @@
+{
+  "id": "custom_flow_1772361466392",
+  "name": "Custom Motion Flow",
+  "initial_state": "grasping_6392",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "grasping_6392",
+      "steps": [
+        {
+          "id": "grasping_grasp_66392",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 0,
+            "speed": 0.02,
+            "force": 20
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 15000
+        }
+      ]
+    },
+    {
+      "name": "grasping_2468",
+      "steps": [
+        {
+          "id": "grasping_grasp_42468",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 0,
+            "speed": 0.02,
+            "force": 20
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 15000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "grasping_6392",
+      "to_state": "grasping_2468",
+      "condition": null
+    }
+  ]
+}

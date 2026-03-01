@@ -15,8 +15,8 @@ class MoveJointParams(BaseModel):
     target_joints_deg: list[float] = Field(
         ...,
         min_length=6,
-        max_length=6,
-        description="Target joint positions in degrees [j0, j1, j2, j3, j4, j5]",
+        max_length=7,
+        description="Target joint positions in degrees. Supports 6-axis and 7-axis robots.",
     )
     acceleration: float = Field(
         default=2.0,
@@ -51,15 +51,11 @@ class MoveJointSkill(Skill[MoveJointParams]):
         return MoveJointParams
 
     async def validate(self, params: MoveJointParams) -> tuple[bool, Optional[str]]:
-        # Validate joint limits (UR3 typical limits)
-        joint_limits_deg = [
-            (-360, 360),  # Base
-            (-360, 360),  # Shoulder
-            (-360, 360),  # Elbow
-            (-360, 360),  # Wrist 1
-            (-360, 360),  # Wrist 2
-            (-360, 360),  # Wrist 3
-        ]
+        if len(params.target_joints_deg) not in (6, 7):
+            return False, "move_joint requires exactly 6 joints (UR/DOBOT) or 7 joints (Panda)"
+
+        # Shared conservative limits until per-robot limits are modeled explicitly.
+        joint_limits_deg = [(-360, 360)] * len(params.target_joints_deg)
 
         for i, (joint_deg, (min_deg, max_deg)) in enumerate(
             zip(params.target_joints_deg, joint_limits_deg)

@@ -1,0 +1,109 @@
+{
+  "id": "custom_flow_1772361375861",
+  "name": "Custom Motion Flow",
+  "initial_state": "linear_move_5861",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "linear_move_5861",
+      "steps": [
+        {
+          "id": "linear_move_linear_75861",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.05,
+            "velocity": 0.03
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "grasping_2872",
+      "steps": [
+        {
+          "id": "grasping_grasp_82872",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 3,
+            "speed": 0.02,
+            "force": 20
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 15000
+        }
+      ]
+    },
+    {
+      "name": "joint_move_7466",
+      "steps": [
+        {
+          "id": "joint_move_joint_07466",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": [
+              -50.75789646397722,
+              6.229823427858732,
+              12.182230539965698,
+              -97.08562927355995,
+              4.675057485089462,
+              110.52913719161715,
+              23.50246506076251
+            ],
+            "acceleration": 0.3,
+            "velocity": 0.15,
+            "tolerance_deg": 1
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "linear_move_5861",
+      "to_state": "grasping_2872",
+      "condition": null
+    },
+    {
+      "type": "sequential",
+      "from_state": "grasping_2872",
+      "to_state": "joint_move_7466",
+      "condition": null
+    }
+  ]
+}

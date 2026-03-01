@@ -1,0 +1,55 @@
+{
+  "id": "test_two_moves",
+  "name": "Test Two Move Joints",
+  "initial_state": "move_first",
+  "loop": false,
+  "variables": {
+    "midair_joints": [-122.69, -109.26, -44.24, -112.69, 89.94, -14.72],
+    "pick_pose": [-0.413, -0.080, 0.094, 0.0, 3.14, 0.0],
+    "approach_z_offset": 0.15,
+    "waypoint_c_joints": [-26.66, -76.09, -89.12, -99.54, 88.68, 154.01],
+    "place_positions": {
+      "Zone_A": [[-0.041, -0.318, 0.174, 0.0, 3.14, 0.0], [0.065, -0.318, 0.174, 0.0, 3.14, 0.0], [-0.015, -0.426, 0.174, 2.20, 2.26, 0.0]],
+      "Zone_B": [[0.248, -0.288, 0.174, 2.20, 2.26, 0.0], [0.248, -0.353, 0.174, 2.20, 2.26, 0.0], [0.352, -0.310, 0.174, 0.0, 3.14, 0.0]],
+      "Zone_C": [[0.386, -0.082, 0.174, 0.0, 3.14, 0.0], [0.270, -0.093, 0.174, 2.20, 2.26, 0.0], [0.270, -0.008, 0.174, 2.20, 2.26, 0.0]],
+      "default":   [[-0.00324, -0.3789, 0.217, 3.14, 0.0, 0.0]]
+    }
+  },
+  "states": [
+    {
+      "name": "move_first",
+      "steps": [
+        {
+          "id": "go_midair",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": "{{midair_joints}}"
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "move_second",
+      "steps": [
+        {
+          "id": "go_waypoint_c",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": "{{waypoint_c_joints}}"
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "move_first",
+      "to_state": "move_second"
+    }
+  ]
+}

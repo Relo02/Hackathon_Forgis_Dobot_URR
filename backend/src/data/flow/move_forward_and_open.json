@@ -1,0 +1,66 @@
+{
+  "id": "move_forward_and_open",
+  "name": "Move Forward and Open",
+  "initial_state": "moving_forward",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "moving_forward",
+      "steps": [
+        {
+          "id": "step_1_move_linear",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ]
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "opening_gripper",
+      "steps": [
+        {
+          "id": "step_2_release",
+          "skill": "release",
+          "executor": "robot",
+          "params": {
+            "speed": 0.05
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "moving_forward",
+      "to_state": "opening_gripper",
+      "condition": null
+    }
+  ]
+}

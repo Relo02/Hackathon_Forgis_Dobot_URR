@@ -1,7 +1,8 @@
 import { useCallback, useState } from "react";
 import { generateFlow } from "@/api/flowApi";
+import { addNodeToFlow } from "@/services/flowMutationService";
 import { layoutFlow } from "@/services/flowLayoutService";
-import type { ChatMessage, Flow } from "@/types";
+import type { ChatMessage, Flow, NodeCreatorState, RobotState } from "@/types";
 
 export function useFlowGeneration() {
   const [flow, setFlow] = useState<Flow | null>(null);
@@ -64,5 +65,9 @@ export function useFlowGeneration() {
     []
   );
 
-  return { flow, messages, loading, sendMessage, updateStepParams };
+  const addNode = useCallback((creator: NodeCreatorState, robotState?: RobotState | null) => {
+    setFlow((prev) => addNodeToFlow(prev, creator, robotState));
+  }, []);
+
+  return { flow, messages, loading, sendMessage, updateStepParams, addNode };
 }

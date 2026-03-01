@@ -16,6 +16,9 @@ interface ParameterEditorProps {
 }
 
 export function ParameterEditor({ selectedStep, onDeselectStep, onParamChange }: ParameterEditorProps) {
+  const isLinearRobotMove =
+    selectedStep.step.skill === "move_linear" && selectedStep.step.executor === "robot";
+
   return (
     <div className="flex flex-col flex-1 min-h-0 border-t border-border -mx-3 mt-3">
       {/* Header */}
@@ -39,6 +42,11 @@ export function ParameterEditor({ selectedStep, onDeselectStep, onParamChange }:
         <div className="forgis-text-detail text-[var(--gunmetal-50)] font-forgis-body">
           executor: {selectedStep.step.executor}
         </div>
+        {isLinearRobotMove && (
+          <div className="forgis-text-detail text-[var(--gunmetal-50)] font-forgis-body">
+            Panda note: if live TCP pose is unavailable, `target_pose` is used as relative `[dx, dy, dz, rx, ry, rz]`.
+          </div>
+        )}
       </div>
 
       {/* Param fields */}

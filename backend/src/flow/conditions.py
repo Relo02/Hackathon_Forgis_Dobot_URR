@@ -52,7 +52,7 @@ def _resolve_io_value(
     executor = executors.get("io_robot")
 
     if executor is None:
-        logger.warning("Executor 'io_robot' not found for condition")
+        # logger.warning("Executor 'io_robot' not found for condition")
         return None
 
     # Access the IO state synchronously from cached values

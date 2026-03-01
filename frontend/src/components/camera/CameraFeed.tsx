@@ -5,38 +5,62 @@ import type { BoundingBoxOverlay } from "@/types";
 import { CONTAINER_CAPACITY, ZONE_LABELS_V2 } from "@/constants/cameraConfig";
 import { BboxOverlay } from "./BboxOverlay";
 import { DetectionStatus, type LatestDetection } from "./DetectionStatus";
-import { StationMap } from "./StationMap";
+import { StationMap, type StationMetric } from "./StationMap";
 
 interface CameraFeedProps {
   frameUrl: string | null;
   streaming: boolean;
   lastLabel?: { label: string; version: number } | null;
+  lastGrasp?: { version: number } | null;
   bboxOverlay?: BoundingBoxOverlay | null;
+  commitCountsOnGrasp?: boolean;
+  graspMetrics?: StationMetric[];
 }
 
-export function CameraFeed({ frameUrl, streaming, lastLabel, bboxOverlay }: CameraFeedProps) {
+export function CameraFeed({
+  frameUrl,
+  streaming,
+  lastLabel,
+  lastGrasp,
+  bboxOverlay,
+  commitCountsOnGrasp = false,
+  graspMetrics,
+}: CameraFeedProps) {
   const zoneLabels = ZONE_LABELS_V2;
   const [collapsed, setCollapsed] = useState(false);
   const [latestDetection, setLatestDetection] = useState<LatestDetection | null>(null);
   const lastBboxRef = useRef<string | null>(null);
+  const pendingZoneRef = useRef<string | null>(null);
   const shotCounterRef = useRef(0);
   const [zoneCounts, setZoneCounts] = useState<Record<string, number>>({
     Zone_A: 0, Zone_B: 0, Zone_C: 0,
   });
 
-  // Track latest label + increment zone count
+  // Track latest label and stage it for the station map.
   useEffect(() => {
     if (lastLabel) {
       shotCounterRef.current += 1;
       setLatestDetection({ type: "label", label: zoneLabels[lastLabel.label] ?? lastLabel.label, shot: shotCounterRef.current });
-      setZoneCounts((prev) => {
-        if (lastLabel.label in prev) {
-          return { ...prev, [lastLabel.label]: prev[lastLabel.label] + 1 };
+      if (lastLabel.label in zoneLabels) {
+        pendingZoneRef.current = lastLabel.label;
+        if (!commitCountsOnGrasp) {
+          setZoneCounts((prev) => ({ ...prev, [lastLabel.label]: prev[lastLabel.label] + 1 }));
+          pendingZoneRef.current = null;
         }
-        return prev;
-      });
+      }
     }
-  }, [lastLabel, zoneLabels]);
+  }, [commitCountsOnGrasp, lastLabel, zoneLabels]);
+
+  // Commit the pending classified item only after a successful grasp.
+  useEffect(() => {
+    if (!commitCountsOnGrasp || !lastGrasp || !pendingZoneRef.current) {
+      return;
+    }
+
+    const zoneKey = pendingZoneRef.current;
+    setZoneCounts((prev) => ({ ...prev, [zoneKey]: prev[zoneKey] + 1 }));
+    pendingZoneRef.current = null;
+  }, [commitCountsOnGrasp, lastGrasp]);
 
   // Track latest bbox detection
   useEffect(() => {
@@ -170,6 +194,7 @@ const imgRef = useRef<HTMLImageElement>(null);
             zoneCounts={zoneCounts}
             zoneLabels={zoneLabels}
             containerCapacity={CONTAINER_CAPACITY}
+            metrics={graspMetrics}
           />
         </div>
       )}

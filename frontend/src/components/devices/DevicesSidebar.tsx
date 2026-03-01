@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronLeft, ChevronRight, Plus } from "lucide-react";
-import type { Device, SelectedStep } from "@/types";
+import type { Device, NodeCreatorState, RobotState, SelectedStep } from "@/types";
 import { DEFAULT_DEVICES } from "@/constants/deviceConfig";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { DeviceList } from "./DeviceList";
 import { AddDeviceDialog } from "./AddDeviceDialog";
 import { NodeCreatorDialog } from "./NodeCreatorDialog";
 import { ParameterEditor } from "./ParameterEditor";
+import { RobotStatePanel } from "./RobotStatePanel";
 
 interface DevicesSidebarProps {
   selectedStep?: SelectedStep | null;
@@ -15,9 +16,21 @@ interface DevicesSidebarProps {
   onParamChange?: (nodeId: string, stepId: string, key: string, value: unknown) => void;
   nodeCreatorOpen?: boolean;
   onCloseNodeCreator?: () => void;
+  onCreateNode?: (creator: NodeCreatorState) => void;
+  robotState?: RobotState | null;
+  robotStateError?: string | null;
 }
 
-export function DevicesSidebar({ selectedStep, onDeselectStep, onParamChange, nodeCreatorOpen, onCloseNodeCreator }: DevicesSidebarProps) {
+export function DevicesSidebar({
+  selectedStep,
+  onDeselectStep,
+  onParamChange,
+  nodeCreatorOpen,
+  onCloseNodeCreator,
+  onCreateNode,
+  robotState,
+  robotStateError,
+}: DevicesSidebarProps) {
   const [devices, setDevices] = useState<Device[]>(DEFAULT_DEVICES);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -55,14 +68,17 @@ export function DevicesSidebar({ selectedStep, onDeselectStep, onParamChange, no
           </div>
 
           {/* Device list */}
-          <div className={cn("overflow-y-auto -mx-3", selectedStep ? "shrink-0 max-h-[40%]" : "flex-1")}>
+          <div className={cn("overflow-y-auto -mx-3", selectedStep ? "shrink-0 max-h-[32%]" : "shrink-0 max-h-[28%]")}>
             <DeviceList devices={devices} compact />
           </div>
+
+          <RobotStatePanel robotState={robotState ?? null} error={robotStateError} />
 
           {/* Node creator dialog */}
           <NodeCreatorDialog
             open={!!nodeCreatorOpen}
             onClose={() => onCloseNodeCreator?.()}
+            onAdd={onCreateNode}
           />
 
           {/* Parameter editor (inline) */}

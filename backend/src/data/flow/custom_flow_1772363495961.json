@@ -1,0 +1,145 @@
+{
+  "id": "custom_flow_1772363495961",
+  "name": "Custom Motion Flow",
+  "initial_state": "linear_move_5961",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "linear_move_5961",
+      "steps": [
+        {
+          "id": "linear_move_linear_95961",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.05,
+            "velocity": 0.3
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "grasping_3875",
+      "steps": [
+        {
+          "id": "grasping_grasp_13875",
+          "skill": "grasp",
+          "executor": "robot",
+          "params": {
+            "width": 0.08,
+            "speed": 0.8,
+            "force": 20
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 15000
+        }
+      ]
+    },
+    {
+      "name": "linear_move_3491",
+      "steps": [
+        {
+          "id": "linear_move_linear_33491",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0,
+              0,
+              0.1,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.05,
+            "velocity": 0.03
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "linear_move_0289",
+      "steps": [
+        {
+          "id": "linear_move_linear_50289",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              -0.1,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.05,
+            "velocity": 0.03
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "linear_move_5961",
+      "to_state": "grasping_3875",
+      "condition": null
+    },
+    {
+      "type": "sequential",
+      "from_state": "grasping_3875",
+      "to_state": "linear_move_3491",
+      "condition": null
+    },
+    {
+      "type": "sequential",
+      "from_state": "linear_move_3491",
+      "to_state": "linear_move_0289",
+      "condition": null
+    }
+  ]
+}
