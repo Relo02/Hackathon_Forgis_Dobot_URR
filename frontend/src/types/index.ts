@@ -7,6 +7,16 @@ export interface FlowStep {
   skill: string;
   executor: string;
   params?: Record<string, unknown>;
+  store_result?: string | null;
+  error_handling?: FlowErrorConfig;
+  timeout_ms?: number;
+}
+
+export interface FlowErrorConfig {
+  strategy: string;
+  max_retries: number;
+  retry_delay_ms: number;
+  fallback_skill?: string | null;
 }
 
 export interface FlowNode {
@@ -29,6 +39,7 @@ export interface Flow {
   id: string;
   name: string;
   loop?: boolean;
+  variables?: Record<string, unknown>;
   nodes: FlowNode[];
   edges: FlowEdge[];
 }
@@ -68,6 +79,7 @@ export interface SelectedStep {
 export interface NodeCreatorState {
   nodeType: string | null;
   task: string | null;
+  motionType: "joint" | "linear" | null;
   label: string;
 }
 
@@ -133,6 +145,27 @@ export interface BoundingBoxOverlay {
   frameHeight: number;
   expiresAt: number;
 }
+
+export interface RobotPose {
+  x: number;
+  y: number;
+  z: number;
+  rx: number;
+  ry: number;
+  rz: number;
+}
+
+export interface RobotState {
+  timestamp: number;
+  robot_type?: "ur" | "dobot" | "panda" | string;
+  joint_count?: number;
+  connected: boolean;
+  ip?: string;
+  joints_deg: number[] | null;
+  pose?: RobotPose | null;
+  moving?: boolean;
+  last_error?: string | null;
+}
 /**
  * Props for the generic ContentPanel component
  */
@@ -154,4 +187,3 @@ export interface ContentPanelProps {
   /** Enable scrolling in content area (default: true) */
   scrollable?: boolean;
 }
-

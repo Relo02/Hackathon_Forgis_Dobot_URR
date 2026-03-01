@@ -195,6 +195,8 @@ class RobotNode(Node):
     def get_state_summary(self) -> dict:
         return {
             "timestamp": time.time(),
+            "robot_type": "ur",
+            "joint_count": 6,
             "connected": self._joint_positions is not None,
             "joints_deg": self.get_joint_positions_deg(),
             "io": {

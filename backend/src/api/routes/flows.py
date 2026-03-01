@@ -6,7 +6,7 @@ from typing import Any, Optional
 logger = logging.getLogger(__name__)
 
 from fastapi import APIRouter, HTTPException, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from flow import FlowSchema, FlowStatusResponse
 
@@ -76,6 +76,9 @@ class FlowStep(BaseModel):
     skill: str
     executor: str
     params: Optional[dict[str, Any]] = None
+    store_result: Optional[str] = None
+    error_handling: Optional[dict[str, Any]] = None
+    timeout_ms: Optional[int] = None
 
 
 class FlowNode(BaseModel):
@@ -105,6 +108,7 @@ class FlowGenerateResponse(BaseModel):
     id: str
     name: str
     loop: bool = False
+    variables: dict[str, Any] = Field(default_factory=dict)
     nodes: list[FlowNode]
     edges: list[FlowEdge]
 
@@ -142,6 +146,9 @@ def convert_backend_to_frontend(flow: FlowSchema) -> FlowGenerateResponse:
                 skill=step.skill,
                 executor=step.executor,
                 params=step.params,
+                store_result=step.store_result,
+                error_handling=step.error_handling.model_dump(),
+                timeout_ms=step.timeout_ms,
             )
             for step in state.steps
         ]
@@ -206,6 +213,7 @@ def convert_backend_to_frontend(flow: FlowSchema) -> FlowGenerateResponse:
         id=flow.id,
         name=flow.name,
         loop=flow.loop,
+        variables=flow.variables,
         nodes=nodes,
         edges=edges,
     )

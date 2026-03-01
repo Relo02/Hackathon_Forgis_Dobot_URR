@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  saveFlow as apiSaveFlow,
   startFlow as apiStartFlow,
   abortFlow as apiAbortFlow,
   pauseFlow as apiPauseFlow,
@@ -25,9 +26,27 @@ export function useFlowExecution(
   const [flowStatus, setFlowStatus] = useState<FlowExecStatus>("idle");
   const [nodeStates, setNodeStates] = useState<Record<string, NodeExecState>>({});
   const [finishing, setFinishing] = useState(false);
+  const [errorLog, setErrorLog] = useState<string[]>([]);
 
   const socketRef = useRef<{ close: () => void } | null>(null);
   const handleMessageRef = useRef<(msg: ServerMessage) => void>(() => {});
+
+  const appendError = useCallback((message: string) => {
+    setErrorLog((prev) => {
+      if (prev[prev.length - 1] === message) {
+        return prev;
+      }
+      return [...prev.slice(-4), message];
+    });
+  }, []);
+
+  const flowNeedsCamera = useCallback(
+    (currentFlow: Flow | null) =>
+      !!currentFlow?.nodes.some((node) =>
+        node.steps?.some((step) => step.executor === "camera")
+      ),
+    []
+  );
 
   // ── WebSocket Event Handling ────────────────────────────────
 
@@ -44,15 +63,19 @@ export function useFlowExecution(
         case "flow_completed":
           setFlowStatus("completed");
           setFinishing(false);
-          stopCameraStream();
-          camera.onStreamStop();
+          if (flowNeedsCamera(flow)) {
+            void stopCameraStream().catch(() => undefined);
+            camera.onStreamStop();
+          }
           break;
 
         case "flow_aborted":
           setFlowStatus("idle");
           setFinishing(false);
-          stopCameraStream();
-          camera.onStreamStop();
+          if (flowNeedsCamera(flow)) {
+            void stopCameraStream().catch(() => undefined);
+            camera.onStreamStop();
+          }
           break;
 
         case "flow_paused":
@@ -65,9 +88,12 @@ export function useFlowExecution(
 
         case "flow_error":
           setFlowStatus("error");
-          stopCameraStream();
-          camera.onStreamStop();
-          console.error("[ws] Flow error:", msg.error);
+          setFinishing(false);
+          if (flowNeedsCamera(flow)) {
+            void stopCameraStream().catch(() => undefined);
+            camera.onStreamStop();
+          }
+          appendError(msg.step_id ? `${msg.step_id}: ${msg.error}` : msg.error);
           break;
 
         case "loop_restart":
@@ -155,6 +181,7 @@ export function useFlowExecution(
         }
 
         case "step_error": {
+          appendError(`${msg.step_id}: ${msg.error}`);
           if (!flow) break;
           const stateId = findStateForStep(flow, msg.step_id);
           if (stateId) {
@@ -192,7 +219,7 @@ export function useFlowExecution(
           break;
       }
     },
-    [flow, camera]
+    [flow, camera, appendError]
   );
 
   // Keep ref updated with latest handleMessage to avoid stale closures in WebSocket
@@ -226,6 +253,7 @@ export function useFlowExecution(
       setNodeStates({});
     }
     setFlowStatus("idle");
+    setErrorLog([]);
   }, [flow]);
 
   // Cleanup on unmount
@@ -246,56 +274,76 @@ export function useFlowExecution(
     }
     setNodeStates(initial);
     setFinishing(false);
+    setErrorLog([]);
 
-    await connectWebSocket();
     try {
-      await startCameraStream(15);
+      await apiSaveFlow(flow);
+      await connectWebSocket();
+
+      const needsCamera = flowNeedsCamera(flow);
+      if (needsCamera) {
+        try {
+          await startCameraStream(15);
+        } catch (err) {
+          appendError(
+            `Camera stream unavailable: ${err instanceof Error ? err.message : "Unknown error"}`
+          );
+        }
+      }
+
+      await apiStartFlow(flow.id);
     } catch (err) {
-      console.warn("Camera stream unavailable, starting flow without camera:", err);
+      appendError(err instanceof Error ? err.message : "Failed to start flow");
+      setFlowStatus("idle");
     }
-    await apiStartFlow(flow.id);
-  }, [flow, connectWebSocket]);
+  }, [flow, connectWebSocket, appendError, flowNeedsCamera]);
 
   const pauseFlow = useCallback(async () => {
     try {
       await apiPauseFlow();
     } catch (err) {
-      console.error("Failed to pause flow:", err);
+      appendError(err instanceof Error ? err.message : "Failed to pause flow");
     }
-  }, []);
+  }, [appendError]);
 
   const resumeFlow = useCallback(async () => {
     try {
       await apiResumeFlow();
     } catch (err) {
-      console.error("Failed to resume flow:", err);
+      appendError(err instanceof Error ? err.message : "Failed to resume flow");
     }
-  }, []);
+  }, [appendError]);
 
   const abortFlow = useCallback(async () => {
     try {
       await apiAbortFlow();
     } catch (err) {
-      console.error("Failed to abort flow:", err);
+      appendError(err instanceof Error ? err.message : "Failed to abort flow");
     }
     setFlowStatus("idle");
-  }, []);
+  }, [appendError]);
 
   const finishFlow = useCallback(async () => {
     setFinishing(true);
     try {
       await apiFinishFlow();
     } catch (err) {
-      console.error("Failed to finish flow:", err);
+      appendError(err instanceof Error ? err.message : "Failed to finish flow");
     }
-  }, []);
+  }, [appendError]);
 
   const resetFlow = useCallback(async () => {
     setFinishing(false);
     socketRef.current?.close();
     socketRef.current = null;
 
-    await stopCameraStream();
+    if (flowNeedsCamera(flow)) {
+      try {
+        await stopCameraStream();
+      } catch {
+        // Ignore camera shutdown failures for non-camera motion testing.
+      }
+    }
     camera.onReset(); // clears frame, labels, QC, bbox
 
     if (flow) {
@@ -306,12 +354,14 @@ export function useFlowExecution(
       setNodeStates(initial);
     }
     setFlowStatus("idle");
-  }, [flow, camera]);
+    setErrorLog([]);
+  }, [flow, camera, flowNeedsCamera]);
 
   return {
     flowStatus,
     nodeStates,
     finishing,
+    errorLog,
     startFlow,
     pauseFlow,
     resumeFlow,

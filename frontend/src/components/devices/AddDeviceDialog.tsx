@@ -1,6 +1,11 @@
 import { useState, type ReactNode } from "react";
 import type { Device, DeviceType } from "@/types";
-import { BRANDS, EMPTY_FORM, type DeviceFormData } from "@/constants/deviceConfig";
+import {
+  BRANDS,
+  EMPTY_FORM,
+  PANDA_DEFAULT_IP,
+  type DeviceFormData,
+} from "@/constants/deviceConfig";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -35,7 +40,26 @@ export function AddDeviceDialog({ trigger, onAdd }: AddDeviceDialogProps) {
   };
 
   const handleTypeChange = (value: DeviceType) => {
-    setForm((prev) => ({ ...prev, type: value, brand: "", robotModel: "" }));
+    setForm((prev) => ({
+      ...prev,
+      type: value,
+      brand: "",
+      robotModel: "",
+      apiEndpoint: value === "robot" ? prev.apiEndpoint : "",
+    }));
+  };
+
+  const handleBrandChange = (value: string) => {
+    setForm((prev) => ({
+      ...prev,
+      brand: value,
+      robotModel:
+        prev.type === "robot" && value === "Franka" ? "Panda" : prev.robotModel,
+      apiEndpoint:
+        prev.type === "robot" && value === "Franka"
+          ? PANDA_DEFAULT_IP
+          : prev.apiEndpoint,
+    }));
   };
 
   const handleOpenChange = (next: boolean) => {
@@ -44,13 +68,17 @@ export function AddDeviceDialog({ trigger, onAdd }: AddDeviceDialogProps) {
   };
 
   const handleAdd = () => {
+    const fallbackIp =
+      form.type === "robot" && form.brand === "Franka"
+        ? PANDA_DEFAULT_IP
+        : "192.168.1.10";
     const newDevice: Device = {
       id: `device-${Date.now()}`,
       name: form.name.trim(),
-      vendor: "Universal Robots",
-      type: "robot",
+      vendor: form.brand,
+      type: form.type as DeviceType,
       status: "connected",
-      ip: form.apiEndpoint.trim() || "192.168.1.10",
+      ip: form.apiEndpoint.trim() || fallbackIp,
     };
     onAdd(newDevice);
     handleOpenChange(false);
@@ -95,7 +123,7 @@ export function AddDeviceDialog({ trigger, onAdd }: AddDeviceDialogProps) {
             <Label htmlFor="device-brand">Brand</Label>
             <Select
               value={form.brand}
-              onValueChange={(v) => set("brand", v)}
+              onValueChange={handleBrandChange}
               disabled={!form.type}
             >
               <SelectTrigger id="device-brand">
@@ -119,7 +147,7 @@ export function AddDeviceDialog({ trigger, onAdd }: AddDeviceDialogProps) {
                 id="robot-model"
                 value={form.robotModel}
                 onChange={(e) => set("robotModel", e.target.value)}
-                placeholder="e.g. UR3, UR10e, IRB 120"
+                placeholder="e.g. Panda, UR3, UR10e, IRB 120"
               />
             </div>
           )}
@@ -143,7 +171,7 @@ export function AddDeviceDialog({ trigger, onAdd }: AddDeviceDialogProps) {
               id="api-endpoint"
               value={form.apiEndpoint}
               onChange={(e) => set("apiEndpoint", e.target.value)}
-              placeholder="e.g. 192.168.1.10"
+              placeholder={form.brand === "Franka" ? PANDA_DEFAULT_IP : "e.g. 192.168.1.10"}
               onKeyDown={(e) => e.key === "Enter" && canAdd && handleAdd()}
             />
           </div>

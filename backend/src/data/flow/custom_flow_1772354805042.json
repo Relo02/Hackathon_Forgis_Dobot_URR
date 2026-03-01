@@ -1,0 +1,80 @@
+{
+  "id": "custom_flow_1772354805042",
+  "name": "Custom Motion Flow",
+  "initial_state": "joint_move_5042",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "joint_move_5042",
+      "steps": [
+        {
+          "id": "joint_move_joint_05042",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": [
+              -37.4081799054103,
+              -58.38295485467861,
+              12.174861388330594,
+              -156.03093750391858,
+              15.451548622229792,
+              106.11395724541471,
+              30.080872735063085
+            ],
+            "acceleration": 0.2,
+            "velocity": 0.1,
+            "tolerance_deg": 1
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    },
+    {
+      "name": "linear_move_2009",
+      "steps": [
+        {
+          "id": "linear_move_linear_12009",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [
+              0,
+              0,
+              0,
+              0,
+              0,
+              0
+            ],
+            "z_offset": 0,
+            "acceleration": 0.03,
+            "velocity": 0.02
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": [
+    {
+      "type": "sequential",
+      "from_state": "joint_move_5042",
+      "to_state": "linear_move_2009",
+      "condition": null
+    }
+  ]
+}

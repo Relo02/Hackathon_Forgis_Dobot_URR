@@ -1,0 +1,41 @@
+{
+  "id": "custom_flow_1772353360736",
+  "name": "Custom Motion Flow",
+  "initial_state": "joint_move_0735",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "joint_move_0735",
+      "steps": [
+        {
+          "id": "joint_move_joint_60736",
+          "skill": "move_joint",
+          "executor": "robot",
+          "params": {
+            "target_joints_deg": [
+              0,
+              0,
+              0,
+              0.5,
+              0,
+              0
+            ],
+            "acceleration": 1,
+            "velocity": 0.6,
+            "tolerance_deg": 1
+          },
+          "store_result": null,
+          "error_handling": {
+            "strategy": "stop",
+            "max_retries": 3,
+            "retry_delay_ms": 1000,
+            "fallback_skill": null
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": []
+}

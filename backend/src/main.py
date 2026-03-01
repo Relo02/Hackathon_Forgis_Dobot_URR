@@ -48,10 +48,11 @@ def main():
 
     # ROS 2 robot node + executor (type-switched)
     if robot_type == "panda":
+        print("HELO1")
         robot = PandaNode()
         robot_executor = PandaExecutor(robot)
         io_robot_executor = None  # Panda I/O can be wired later
-        logger.info("Using Panda robot")
+        logger.info("Using Panda HELO2 robot")
     elif robot_type == "dobot":
         robot = DobotNova5Node()
         robot_executor = DobotNova5Executor(robot)
@@ -94,11 +95,9 @@ def main():
     # FastAPI application
     app = create_app(flow_manager, ws_manager, robot, camera_executor, io_robot_executor, hand_executor)
 
-    # ROS 2 executor with nodes.
-    # PandaNode is not an rclpy Node — skip adding it.
+    # ROS 2 executor with nodes
     ros_executor = MultiThreadedExecutor()
-    if robot_type != "panda":
-        ros_executor.add_node(robot)
+    ros_executor.add_node(robot)
     ros_executor.add_node(camera)
     ros_executor.add_node(camera_bridge)
     ros_executor.add_node(hand)
@@ -127,8 +126,7 @@ def main():
     finally:
         logger.info("Shutting down...")
         ros_executor.shutdown()
-        if robot_type != "panda":
-            robot.destroy_node()
+        robot.destroy_node()
         camera.destroy_node()
         camera_bridge.destroy_node()
         hand.destroy_node()

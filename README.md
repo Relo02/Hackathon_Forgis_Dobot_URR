@@ -142,6 +142,12 @@ docker compose up --build
 docker compose up --build
 ```
 
+For Panda, run the backend directly in Panda mode:
+
+```bash
+ROBOT_TYPE=panda docker compose up --build
+```
+
 **2. Open the frontend:**
 
 Open http://localhost in your browser.

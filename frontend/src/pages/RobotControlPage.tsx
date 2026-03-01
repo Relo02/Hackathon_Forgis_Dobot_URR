@@ -15,12 +15,14 @@ import {
 import { useFlowGeneration } from "@/hooks/useFlowGeneration";
 import { useCamera } from "@/hooks/useCamera";
 import { useFlowExecution } from "@/hooks/useFlowExecution";
+import { useRobotState } from "@/hooks/useRobotState";
 import type { SelectedStep } from "@/types";
 
 export function RobotControlPage() {
-  const { flow, messages, loading, sendMessage, updateStepParams } = useFlowGeneration();
+  const { flow, messages, loading, sendMessage, updateStepParams, addNode } = useFlowGeneration();
   const { cameraFrame, lastLabel, bboxOverlay, callbacks: cameraCallbacks } = useCamera();
-  const { flowStatus, nodeStates, finishing, startFlow, pauseFlow, resumeFlow, finishFlow, resetFlow } = useFlowExecution(flow, cameraCallbacks);
+  const { robotState, robotStateError } = useRobotState();
+  const { flowStatus, nodeStates, finishing, errorLog, startFlow, pauseFlow, resumeFlow, finishFlow, resetFlow } = useFlowExecution(flow, cameraCallbacks);
 
   const [selectedStep, setSelectedStep] = useState<SelectedStep | null>(null);
   const [nodeCreatorOpen, setNodeCreatorOpen] = useState(false);
@@ -70,6 +72,12 @@ export function RobotControlPage() {
             }}
             nodeCreatorOpen={nodeCreatorOpen}
             onCloseNodeCreator={() => setNodeCreatorOpen(false)}
+            onCreateNode={(creator) => {
+              addNode(creator, robotState);
+              setNodeCreatorOpen(false);
+            }}
+            robotState={robotState}
+            robotStateError={robotStateError}
           />
         ) : (
           <CameraFeed frameUrl={cameraFrame} streaming lastLabel={lastLabel} bboxOverlay={bboxOverlay} />
@@ -82,6 +90,7 @@ export function RobotControlPage() {
               flow={flow}
               flowStatus={flowStatus}
               nodeStates={nodeStates}
+              errorLog={errorLog}
               onStart={startFlow}
               onPause={pauseFlow}
               onResume={resumeFlow}

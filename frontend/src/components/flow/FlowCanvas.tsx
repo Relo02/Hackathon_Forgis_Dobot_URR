@@ -31,6 +31,7 @@ interface FlowCanvasProps {
   flow: FlowType | null;
   flowStatus: FlowExecStatus;
   nodeStates: Record<string, NodeExecState>;
+  errorLog?: string[];
   onStart: () => void;
   onPause: () => void;
   onResume: () => void;
@@ -45,6 +46,7 @@ export function FlowCanvas({
   flow,
   flowStatus,
   nodeStates,
+  errorLog,
   onStart,
   onPause,
   onResume,
@@ -112,6 +114,7 @@ export function FlowCanvas({
           <FlowControls
             flowStatus={flowStatus}
             finishing={finishing}
+            errorLog={errorLog}
             onStart={onStart}
             onPause={onPause}
             onResume={onResume}
@@ -121,7 +124,7 @@ export function FlowCanvas({
         ) : undefined
       }
       actions={
-        flow ? (
+        (
           <button
             onClick={onAddNode}
             className="flex items-center justify-center w-7 h-7 rounded-md border border-border forgis-text-label font-normal text-foreground cursor-pointer hover:bg-muted/60 transition-colors"
@@ -129,7 +132,7 @@ export function FlowCanvas({
           >
             <Plus size={14} />
           </button>
-        ) : undefined
+        )
       }
     >
       <div className="relative w-full h-full">

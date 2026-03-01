@@ -1,265 +1,549 @@
-"""Franka Panda node using franky-control (ROS-free, direct FCI connection).
+"""ROS 2 node wrapper for Franka Panda motion via franky-control.
 
-franky connects directly to the robot over TCP — no ROS stack required.
+This keeps the Panda integration aligned with the rest of the backend:
+- it is a real ``rclpy`` node
+- it is added to the shared ROS 2 executor in ``main.py``
+- it exposes the same synchronous API the Panda executor already uses
 
-Install the pre-built wheel (Python 3.12, Ubuntu ≥ 22.04):
-    pip install /home/lorenzo/franka-robot/dist/franky_control-1.1.3-cp312-cp312-manylinux_2_28_x86_64.whl
+Motion commands follow the same ``franky`` patterns shown in
+``example_joint.py`` and ``example_linear.py``:
+- joint moves use ``JointMotion``
+- linear moves use ``CartesianMotion(..., ReferenceType.Relative)``
 
-Set ROBOT_IP in .env to the robot's FCI IP (e.g. 10.90.90.1).
-Set ROBOT_DYNAMICS (0.0–1.0, default 0.1) to limit speed for safety.
-
-Motion commands run in a background thread (fire-and-forget) so
-PandaExecutor can poll for completion without blocking asyncio.
+The rest of the backend still treats this like the UR and DOBOT nodes:
+the executor calls ``send_movej()``, ``send_movel()``, and polls cached state.
 """
 
-import math
 import logging
+import math
 import os
 import threading
 import time
-from typing import Optional, List
-from franky import (
-    Affine,
-    CartesianMotion,
-    Gripper,
-    JointMotion,
-    ReferenceType,
-    Robot,
-)
-from scipy.spatial.transform import Rotation
+from typing import Optional
+
+import numpy as np
+from franky import Affine, CartesianMotion, Gripper, JointMotion, ReferenceType, Robot
+from rclpy.node import Node
 
 logger = logging.getLogger(__name__)
 
 PANDA_NUM_JOINTS = 7
-_DEFAULT_IP = "10.90.90.1"
-_DEFAULT_DYNAMICS = 0.1   # 10% — safe default for first runs
-_HOME_JOINTS = [0.0, -math.pi / 4, 0.0, -3 * math.pi / 4, 0.0, math.pi / 2, math.pi / 4]
+DEFAULT_PANDA_IP = "192.168.15.33"
+DEFAULT_DYNAMICS = 0.005
+MIN_DYNAMICS = 0.002
+MAX_DYNAMICS = 0.05
+DEFAULT_STATE_POLL_HZ = 20.0
+HOME_JOINTS = [0.0, -math.pi / 4, 0.0, 0.0, 0.0, math.pi / 2, math.pi / 4]
 
 
-class PandaNode:
-    """Franka Panda wrapper using franky-control.
+def _rotation_matrix_from_xyz_euler(rx: float, ry: float, rz: float) -> np.ndarray:
+    """Build a rotation matrix from extrinsic XYZ Euler angles."""
+    cx, sx = math.cos(rx), math.sin(rx)
+    cy, sy = math.cos(ry), math.sin(ry)
+    cz, sz = math.cos(rz), math.sin(rz)
 
-    Provides the same synchronous API as DobotNova5Node / RobotNode so
-    PandaExecutor, the skill system, and FastAPI routes work unchanged.
+    rot_x = np.array([[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]])
+    rot_y = np.array([[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]])
+    rot_z = np.array([[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]])
+    return rot_z @ rot_y @ rot_x
 
-    Public interface (consumed by PandaExecutor):
-        send_movej(target_rad, accel, vel)
-        send_movel(pose, accel, vel)
-        get_joint_positions() -> List[float] | None   (radians, 7 DOF)
-        get_joint_positions_deg() -> List[float] | None
-        joints_at_target(target_rad, tolerance) -> bool
-        get_state_summary() -> dict
-    """
+
+def _xyz_euler_from_rotation_matrix(rotation: np.ndarray) -> list[float]:
+    """Convert a rotation matrix to extrinsic XYZ Euler angles."""
+    sy = -rotation[2, 0]
+    cy = math.sqrt(max(0.0, 1.0 - sy * sy))
+
+    if cy > 1e-6:
+        rx = math.atan2(rotation[2, 1], rotation[2, 2])
+        ry = math.asin(sy)
+        rz = math.atan2(rotation[1, 0], rotation[0, 0])
+    else:
+        # Gimbal lock fallback.
+        rx = math.atan2(-rotation[1, 2], rotation[1, 1])
+        ry = math.asin(sy)
+        rz = 0.0
+
+    return [rx, ry, rz]
+
+
+def _quaternion_xyzw_from_rotation_matrix(rotation: np.ndarray) -> list[float]:
+    """Convert a rotation matrix to an XYZW quaternion."""
+    trace = float(rotation[0, 0] + rotation[1, 1] + rotation[2, 2])
+    if trace > 0.0:
+        s = math.sqrt(trace + 1.0) * 2.0
+        qw = 0.25 * s
+        qx = (rotation[2, 1] - rotation[1, 2]) / s
+        qy = (rotation[0, 2] - rotation[2, 0]) / s
+        qz = (rotation[1, 0] - rotation[0, 1]) / s
+    elif rotation[0, 0] > rotation[1, 1] and rotation[0, 0] > rotation[2, 2]:
+        s = math.sqrt(1.0 + rotation[0, 0] - rotation[1, 1] - rotation[2, 2]) * 2.0
+        qw = (rotation[2, 1] - rotation[1, 2]) / s
+        qx = 0.25 * s
+        qy = (rotation[0, 1] + rotation[1, 0]) / s
+        qz = (rotation[0, 2] + rotation[2, 0]) / s
+    elif rotation[1, 1] > rotation[2, 2]:
+        s = math.sqrt(1.0 + rotation[1, 1] - rotation[0, 0] - rotation[2, 2]) * 2.0
+        qw = (rotation[0, 2] - rotation[2, 0]) / s
+        qx = (rotation[0, 1] + rotation[1, 0]) / s
+        qy = 0.25 * s
+        qz = (rotation[1, 2] + rotation[2, 1]) / s
+    else:
+        s = math.sqrt(1.0 + rotation[2, 2] - rotation[0, 0] - rotation[1, 1]) * 2.0
+        qw = (rotation[1, 0] - rotation[0, 1]) / s
+        qx = (rotation[0, 2] + rotation[2, 0]) / s
+        qy = (rotation[1, 2] + rotation[2, 1]) / s
+        qz = 0.25 * s
+
+    quaternion = np.array([qx, qy, qz, qw], dtype=float)
+    norm = np.linalg.norm(quaternion)
+    if norm <= 1e-9:
+        return [0.0, 0.0, 0.0, 1.0]
+    return (quaternion / norm).tolist()
+
+
+def _extract_pose_components(pose_obj) -> tuple[Optional[list[float]], Optional[np.ndarray]]:
+    """Best-effort extraction of translation/rotation from different franky pose shapes."""
+    if pose_obj is None:
+        return None, None
+
+    if hasattr(pose_obj, "pose"):
+        return _extract_pose_components(pose_obj.pose)
+
+    if hasattr(pose_obj, "end_effector_pose"):
+        return _extract_pose_components(pose_obj.end_effector_pose)
+
+    translation = None
+    if hasattr(pose_obj, "translation"):
+        try:
+            translation = list(pose_obj.translation)
+        except Exception:
+            translation = None
+
+    rotation = None
+    if hasattr(pose_obj, "rotation"):
+        try:
+            rotation = np.array(pose_obj.rotation, dtype=float)
+        except Exception:
+            rotation = None
+
+    if translation is not None and rotation is not None:
+        return translation, rotation
+
+    return None, None
+
+
+class PandaNode(Node):
+    """ROS 2 node that wraps direct Panda control and caches robot state."""
 
     def __init__(self):
-        ip = os.environ.get("PANDA_IP", _DEFAULT_IP)
-        dynamics = float(os.environ.get("ROBOT_DYNAMICS", _DEFAULT_DYNAMICS))
+        super().__init__("panda_node")
 
-        self._ip = ip
+        self._ip = os.environ.get("PANDA_IP", DEFAULT_PANDA_IP)
+        self._dynamics = min(
+            MAX_DYNAMICS,
+            max(MIN_DYNAMICS, float(os.environ.get("ROBOT_DYNAMICS", DEFAULT_DYNAMICS))),
+        )
+        self._state_poll_hz = float(
+            os.environ.get("PANDA_STATE_POLL_HZ", DEFAULT_STATE_POLL_HZ)
+        )
+
         self._robot: Optional[Robot] = None
         self._gripper: Optional[Gripper] = None
         self._connected = False
+        self._running = True
+        self._lock = threading.Lock()
+
         self._motion_thread: Optional[threading.Thread] = None
-        self._motion_lock = threading.Lock()
+        self._joint_positions: Optional[list[float]] = None
+        self._pose_translation: Optional[list[float]] = None
+        self._pose_rotation: Optional[np.ndarray] = None
+        self._last_error: Optional[str] = None
+
+        self._connect_thread = threading.Thread(
+            target=self._connection_loop,
+            daemon=True,
+        )
+        self._connect_thread.start()
+
+        self.create_timer(1.0 / self._state_poll_hz, self._refresh_state)
+
+        self.get_logger().info(
+            f"PandaNode initialized - target={self._ip}, dynamics={self._dynamics:.3f}"
+        )
+
+    def _connection_loop(self) -> None:
+        """Keep trying to establish the direct Panda connection."""
+        while self._running:
+            if self._connected:
+                time.sleep(1.0)
+                continue
+
+            try:
+                self.get_logger().info(f"Connecting to Panda at {self._ip}")
+                robot = Robot(self._ip)
+                robot.recover_from_errors()
+                robot.relative_dynamics_factor = self._dynamics
+                gripper = Gripper(self._ip)
+
+                with self._lock:
+                    self._robot = robot
+                    self._gripper = gripper
+                    self._connected = True
+                    self._last_error = None
+
+                self.get_logger().info("Connected to Panda")
+            except Exception as exc:
+                self._last_error = str(exc)
+                self.get_logger().warning(
+                    f"Panda connection failed: {exc}",
+                    throttle_duration_sec=10.0,
+                )
+                time.sleep(2.0)
+
+    def _refresh_state(self) -> None:
+        """Cache the latest joint and pose state for executor polling."""
+        if not self._connected:
+            return
 
         try:
-            logger.info("PandaNode: connecting to %s (dynamics=%.0f%%) …", ip, dynamics * 100)
-            self._robot = Robot(ip)
-            self._robot.recover_from_errors()
-            self._robot.relative_dynamics_factor = dynamics
-            self._gripper = Gripper(ip)
-            self._connected = True
-            logger.info("PandaNode: connected")
+            joints, translation, rotation = self._read_robot_state()
+            if joints is None or translation is None or rotation is None:
+                return
+
+            with self._lock:
+                self._joint_positions = joints
+                self._pose_translation = translation
+                self._pose_rotation = rotation
         except Exception as exc:
-            logger.warning("PandaNode: connection failed — %s", exc)
+            self._last_error = str(exc)
+            self.get_logger().warning(
+                f"Failed to refresh Panda state: {exc}",
+                throttle_duration_sec=5.0,
+            )
 
-    # ── Internal: dispatch a blocking franky move to a background thread ─────
+    def _read_robot_state(
+        self,
+    ) -> tuple[Optional[list[float]], Optional[list[float]], Optional[np.ndarray]]:
+        """Read the latest joint and Cartesian state directly from franky."""
+        with self._lock:
+            robot = self._robot
 
-    def _run_motion(self, motion) -> None:
-        """Start *motion* in a daemon thread and return immediately."""
-        def _worker():
+        if robot is None:
+            return None, None, None
+
+        joints = None
+        try:
+            if hasattr(robot, "current_joint_state"):
+                joints = list(robot.current_joint_state.position)
+        except Exception:
+            joints = None
+
+        if joints is None:
             try:
-                self._robot.move(motion)
-            except Exception as exc:
-                logger.error("PandaNode: motion error — %s", exc)
+                joints = list(robot.state.q)
+            except Exception:
+                joints = None
 
-        with self._motion_lock:
-            self._motion_thread = threading.Thread(target=_worker, daemon=True)
+        translation = None
+        rotation = None
+
+        try:
+            if hasattr(robot, "current_cartesian_state"):
+                cartesian_state = robot.current_cartesian_state
+                translation, rotation = _extract_pose_components(cartesian_state)
+        except Exception:
+            translation = None
+            rotation = None
+
+        if translation is None or rotation is None:
+            try:
+                translation, rotation = _extract_pose_components(robot.current_pose)
+            except Exception:
+                translation = None
+                rotation = None
+
+        return joints, translation, rotation
+
+    def _recover_from_errors(self) -> None:
+        with self._lock:
+            robot = self._robot
+        if robot is None:
+            return
+        try:
+            robot.recover_from_errors()
+        except Exception as exc:
+            self.get_logger().warning(f"Panda recover_from_errors failed: {exc}")
+
+    def _compute_dynamics_factor(
+        self,
+        accel: float,
+        vel: float,
+        *,
+        accel_reference: float,
+        velocity_reference: float,
+    ) -> float:
+        requested_scale = min(
+            1.0,
+            max(0.0, accel / accel_reference),
+            max(0.0, vel / velocity_reference),
+        )
+        return min(self._dynamics, max(MIN_DYNAMICS, self._dynamics * requested_scale))
+
+    def _start_motion(self, motion, label: str, dynamics_factor: float) -> None:
+        """Run a blocking franky move in a background thread."""
+
+        def worker() -> None:
+            try:
+                with self._lock:
+                    robot = self._robot
+
+                if robot is None:
+                    self._last_error = "Robot not connected"
+                    self.get_logger().error(f"{label}: robot not connected")
+                    return
+
+                robot.relative_dynamics_factor = dynamics_factor
+                self._recover_from_errors()
+                robot.move(motion)
+            except Exception as exc:
+                self._last_error = str(exc)
+                self.get_logger().error(f"{label} failed: {exc}")
+            finally:
+                self._refresh_state()
+
+        with self._lock:
+            if self._motion_thread is not None and self._motion_thread.is_alive():
+                raise RuntimeError("Panda is already executing another motion")
+            self._last_error = None
+            self._motion_thread = threading.Thread(target=worker, daemon=True)
             self._motion_thread.start()
 
-    # ── Motion commands ──────────────────────────────────────────────────────
+    def _current_pose_snapshot(self) -> tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+        with self._lock:
+            if self._pose_translation is None or self._pose_rotation is None:
+                translation = None
+                rotation = None
+            else:
+                translation = np.array(self._pose_translation, dtype=float)
+                rotation = np.array(self._pose_rotation, dtype=float)
+
+        if translation is not None and rotation is not None:
+            return translation, rotation
+
+        live_joints, live_translation, live_rotation = self._read_robot_state()
+        if live_joints is None or live_translation is None or live_rotation is None:
+            return None, None
+
+        with self._lock:
+            self._joint_positions = live_joints
+            self._pose_translation = live_translation
+            self._pose_rotation = live_rotation
+
+        return np.array(live_translation, dtype=float), np.array(live_rotation, dtype=float)
 
     def send_movej(
         self,
-        target_rad: List[float],
-        accel: float = 1.4,  # noqa: ARG002
-        vel: float = 1.05,   # noqa: ARG002
+        target_rad: list[float],
+        accel: float = 1.4,
+        vel: float = 1.05,
     ) -> None:
-        """Joint-space move to *target_rad* (7 radians). Returns immediately."""
-        if not self._connected or self._robot is None:
-            logger.error("PandaNode.send_movej: not connected")
+        """Dispatch a joint-space move using franky's JointMotion."""
+        if len(target_rad) != PANDA_NUM_JOINTS:
+            raise ValueError(
+                f"PandaNode.send_movej expected {PANDA_NUM_JOINTS} joints, got {len(target_rad)}"
+            )
+        if not self._connected:
+            self.get_logger().error("Panda send_movej requested while disconnected")
             return
-        logger.info(
-            "PandaNode: send_movej %s deg",
-            [round(math.degrees(j), 1) for j in target_rad],
+
+        dynamics_factor = self._compute_dynamics_factor(
+            accel,
+            vel,
+            accel_reference=2.0,
+            velocity_reference=2.0,
         )
-        self._run_motion(JointMotion(list(target_rad)))
+        self.get_logger().info(
+            "Panda joint move: "
+            f"{[round(math.degrees(joint), 1) for joint in target_rad]} deg "
+            f"(dynamics={dynamics_factor:.3f})"
+        )
+        self._start_motion(JointMotion(list(target_rad)), "send_movej", dynamics_factor)
 
     def send_movel(
         self,
-        pose: List[float],
-        accel: float = 1.2,  # noqa: ARG002
-        vel: float = 0.25,   # noqa: ARG002
+        pose: list[float],
+        accel: float = 1.2,
+        vel: float = 0.25,
     ) -> None:
-        """Cartesian linear move to *pose* = [x, y, z, rx, ry, rz] (m / rad, absolute).
+        """Dispatch an absolute Cartesian move using a relative franky motion.
 
-        rx, ry, rz are roll-pitch-yaw (extrinsic XYZ Euler angles).
-        Returns immediately; PandaExecutor detects completion via joint
-        stability polling.
+        The backend skill API supplies an absolute pose [x, y, z, rx, ry, rz].
+        The franky example in this repo uses relative Cartesian motion, so this
+        method converts the absolute target into a relative transform from the
+        current end-effector pose, then sends ``CartesianMotion(..., Relative)``.
         """
-        if not self._connected or self._robot is None:
-            logger.error("PandaNode.send_movel: not connected")
+        if len(pose) != 6:
+            raise ValueError(f"PandaNode.send_movel expected 6 pose values, got {len(pose)}")
+        if not self._connected:
+            self.get_logger().error("Panda send_movel requested while disconnected")
             return
-        x, y, z, rx, ry, rz = pose
-        quat = Rotation.from_euler("xyz", [rx, ry, rz]).as_quat()  # [x,y,z,w]
-        target = Affine([x, y, z], quat)
-        logger.info(
-            "PandaNode: send_movel xyz=[%.3f, %.3f, %.3f] rpy_deg=[%.1f, %.1f, %.1f]",
-            x, y, z, math.degrees(rx), math.degrees(ry), math.degrees(rz),
+
+        dynamics_factor = self._compute_dynamics_factor(
+            accel,
+            vel,
+            accel_reference=3.0,
+            velocity_reference=1.0,
         )
-        self._run_motion(CartesianMotion(target))
+        current_translation, current_rotation = self._current_pose_snapshot()
+        if current_translation is None or current_rotation is None:
+            # Fall back to franky's verified relative Cartesian path when no
+            # live Panda pose is available from the local python bindings.
+            relative_translation = np.array(pose[:3], dtype=float)
+            relative_rotation = np.eye(3, dtype=float)
+            relative_quaternion = _quaternion_xyzw_from_rotation_matrix(relative_rotation)
+            self.get_logger().warning(
+                "Current Panda pose is unavailable; interpreting move_linear target_pose as a relative XYZ move"
+            )
+        else:
+            target_translation = np.array(pose[:3], dtype=float)
+            target_rotation = _rotation_matrix_from_xyz_euler(*pose[3:])
 
-    def send_movel_relative(self, delta: List[float]) -> None:
-        """Relative Cartesian move. delta = [dx, dy, dz, drx, dry, drz] (m / rad)."""
-        if not self._connected or self._robot is None:
-            logger.error("PandaNode.send_movel_relative: not connected")
-            return
-        x, y, z, rx, ry, rz = delta
-        quat = Rotation.from_euler("xyz", [rx, ry, rz]).as_quat()
-        target = Affine([x, y, z], quat)
-        self._run_motion(CartesianMotion(target, ReferenceType.Relative))
+            relative_translation = current_rotation.T @ (target_translation - current_translation)
+            relative_rotation = current_rotation.T @ target_rotation
+            relative_quaternion = _quaternion_xyzw_from_rotation_matrix(relative_rotation)
 
-    # ── Gripper helpers ───────────────────────────────────────────────────────
+        self.get_logger().info(
+            "Panda linear move: "
+            f"xyz=[{pose[0]:.3f}, {pose[1]:.3f}, {pose[2]:.3f}] "
+            f"rpy_deg=[{math.degrees(pose[3]):.1f}, {math.degrees(pose[4]):.1f}, {math.degrees(pose[5]):.1f}] "
+            f"(dynamics={dynamics_factor:.3f})"
+        )
+
+        motion = CartesianMotion(
+            Affine(relative_translation.tolist(), relative_quaternion),
+            ReferenceType.Relative,
+        )
+        self._start_motion(motion, "send_movel", dynamics_factor)
 
     def open_gripper(self, width: float = 0.08, speed: float = 0.1) -> None:
-        """Open gripper to *width* metres at *speed* m/s."""
-        if self._gripper:
-            try:
-                self._gripper.move(width, speed)
-            except Exception as exc:
-                logger.error("PandaNode.open_gripper: %s", exc)
+        with self._lock:
+            gripper = self._gripper
+        if gripper is None:
+            raise RuntimeError("Panda gripper not connected")
+        gripper.move(width, speed)
 
     def close_gripper(self) -> None:
-        """Close gripper (grasp)."""
-        if self._gripper:
-            try:
-                self._gripper.grasp()
-            except Exception as exc:
-                logger.error("PandaNode.close_gripper: %s", exc)
+        with self._lock:
+            gripper = self._gripper
+        if gripper is None:
+            raise RuntimeError("Panda gripper not connected")
+        gripper.grasp()
 
     def reset_joints(self) -> None:
-        """Blocking move to the canonical home configuration."""
-        if self._robot:
-            self._robot.move(JointMotion(_HOME_JOINTS))
+        self.send_movej(HOME_JOINTS)
+        while self.is_moving():
+            time.sleep(0.05)
 
-    # ── State queries ─────────────────────────────────────────────────────────
+    def get_joint_positions(self) -> Optional[list[float]]:
+        with self._lock:
+            cached = None if self._joint_positions is None else list(self._joint_positions)
 
-    def get_joint_positions(self) -> Optional[List[float]]:
-        """Return current joint positions in radians (7 DOF), or None."""
-        if not self._connected or self._robot is None:
+        if cached is not None:
+            return cached
+
+        joints, translation, rotation = self._read_robot_state()
+        if joints is None:
             return None
-        try:
-            return list(self._robot.state.q)
-        except Exception as exc:
-            logger.error("PandaNode.get_joint_positions: %s", exc)
-            return None
 
-    def get_joint_positions_deg(self) -> Optional[List[float]]:
-        """Return current joint positions in degrees, or None."""
+        with self._lock:
+            self._joint_positions = joints
+            if translation is not None:
+                self._pose_translation = translation
+            if rotation is not None:
+                self._pose_rotation = rotation
+        return list(joints)
+
+    def get_joint_positions_deg(self) -> Optional[list[float]]:
         joints = self.get_joint_positions()
         if joints is None:
             return None
-        return [math.degrees(j) for j in joints]
+        return [math.degrees(joint) for joint in joints]
 
-    def joints_at_target(
-        self, target_rad: List[float], tolerance: float = 0.02
-    ) -> bool:
-        """True when every joint is within *tolerance* radians of *target_rad*."""
+    def joints_at_target(self, target_rad: list[float], tolerance: float = 0.02) -> bool:
         current = self.get_joint_positions()
         if current is None:
             return False
-        return all(abs(c - t) < tolerance for c, t in zip(current, target_rad))
+        return all(abs(current_joint - target_joint) < tolerance for current_joint, target_joint in zip(current, target_rad))
 
     def is_moving(self) -> bool:
-        """True if a background motion thread is still running."""
-        with self._motion_lock:
+        with self._lock:
             return self._motion_thread is not None and self._motion_thread.is_alive()
 
-    def get_pose(self) -> Optional[Affine]:
-        """Return current end-effector pose as franky.Affine, or None."""
-        if not self._connected or self._robot is None:
-            return None
-        try:
-            return self._robot.current_pose
-        except Exception as exc:
-            logger.error("PandaNode.get_pose: %s", exc)
-            return None
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def get_last_error(self) -> Optional[str]:
+        return self._last_error
+
+    def get_connection_target(self) -> str:
+        return self._ip
 
     def get_pose_dict(self) -> Optional[dict]:
-        """Return current EE pose as a JSON-serializable dict, or None.
-
-        Keys: x, y, z (metres), rx, ry, rz (radians, extrinsic XYZ Euler).
-        """
-        affine = self.get_pose()
-        if affine is None:
+        try:
+            translation, rotation = self._current_pose_snapshot()
+            if translation is None or rotation is None:
+                return None
+            rx, ry, rz = _xyz_euler_from_rotation_matrix(rotation)
+            return {
+                "x": float(translation[0]),
+                "y": float(translation[1]),
+                "z": float(translation[2]),
+                "rx": rx,
+                "ry": ry,
+                "rz": rz,
+            }
+        except Exception as exc:
+            self._last_error = str(exc)
+            self.get_logger().warning(
+                f"Failed to build Panda pose dict: {exc}",
+                throttle_duration_sec=5.0,
+            )
             return None
-        translation = list(affine.translation)
-        rpy = Rotation.from_matrix(affine.rotation).as_euler("xyz").tolist()
-        return {
-            "x": translation[0],
-            "y": translation[1],
-            "z": translation[2],
-            "rx": rpy[0],
-            "ry": rpy[1],
-            "rz": rpy[2],
-        }
 
     def get_state_summary(self) -> dict:
+        try:
+            joints_deg = self.get_joint_positions_deg()
+        except Exception as exc:
+            self._last_error = str(exc)
+            self.get_logger().warning(
+                f"Failed to read Panda joints: {exc}",
+                throttle_duration_sec=5.0,
+            )
+            joints_deg = None
+
+        try:
+            pose = self.get_pose_dict()
+        except Exception as exc:
+            self._last_error = str(exc)
+            self.get_logger().warning(
+                f"Failed to read Panda pose: {exc}",
+                throttle_duration_sec=5.0,
+            )
+            pose = None
+
         return {
             "timestamp": time.time(),
+            "robot_type": "panda",
+            "joint_count": PANDA_NUM_JOINTS,
             "connected": self._connected,
-            "joints_deg": self.get_joint_positions_deg(),
+            "ip": self._ip,
+            "joints_deg": joints_deg,
+            "pose": pose,
+            "moving": self.is_moving(),
+            "last_error": self._last_error,
             "io": {"digital_in": [], "digital_out": []},
         }
 
-# Uncomment for testing
-# def example_sequences():
-#     """Example motion sequences — run directly to test against the real robot."""
-#     node = PandaNode()
-#     if not node._connected:
-#         logger.error("PandaNode example: not connected, skipping")
-#         return
-
-#     logger.info("PandaNode example: resetting to home")
-#     node.reset_joints()
-
-#     logger.info("PandaNode example: moving to joint target")
-#     target_rad = [0.0, -0.5, 0.0, 0.2, 0.0, 0.5, 0.0]
-#     node.send_movej(target_rad)
-#     while not node.joints_at_target(target_rad):
-#         time.sleep(0.1)
-#     logger.info("PandaNode example: joint target reached — %s deg", node.get_joint_positions_deg())
-
-#     # logger.info("PandaNode example: Cartesian move +5 cm in Z (relative)")
-#     # node.send_movel_relative([0, 0, 0.05, 0, 0, 0])
-#     # while node.is_moving():
-#     #     time.sleep(0.1)
-#     # logger.info("PandaNode example: done — pose %s", node.get_pose())
-
-#     logger.info("PandaNode example: returning home")
-#     node.reset_joints()
-
-
-# if __name__ == "__main__":
-#     logging.basicConfig(level=logging.INFO)
-#     example_sequences()
+    def destroy_node(self) -> bool:
+        self._running = False
+        return super().destroy_node()

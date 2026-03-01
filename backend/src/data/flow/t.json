@@ -1,0 +1,24 @@
+{
+  "id": "simple_move_task",
+  "name": "Simple Linear Move Task",
+  "initial_state": "start_midair",
+  "loop": false,
+  "variables": {},
+  "states": [
+    {
+      "name": "start_midair",
+      "steps": [
+        {
+          "id": "move_to_perturbed_pose",
+          "skill": "move_linear",
+          "executor": "robot",
+          "params": {
+            "target_pose": [0.8, 0.0, 0.0, 0.0, 0.0, 0.0]
+          },
+          "timeout_ms": 30000
+        }
+      ]
+    }
+  ],
+  "transitions": []
+}

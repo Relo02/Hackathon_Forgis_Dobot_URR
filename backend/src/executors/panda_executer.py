@@ -32,22 +32,37 @@ class PandaExecutor(Executor):
     async def initialize(self) -> None:
         """Wait for Panda connection."""
         logger.info("PandaExecutor initializing...")
-        timeout = 10.0
-        elapsed = 0.0
-        while self._node.get_joint_positions() is None and elapsed < timeout:
-            await asyncio.sleep(0.1)
-            elapsed += 0.1
-
-        if self._node.get_joint_positions() is None:
-            logger.warning("Panda joint positions not available after timeout")
-        else:
+        if await self._wait_until_ready(timeout=10.0):
             logger.info("PandaExecutor ready")
+        else:
+            logger.warning(self._not_ready_message())
 
     async def shutdown(self) -> None:
         pass
 
     def is_ready(self) -> bool:
-        return self._node.get_joint_positions() is not None
+        return self._node.is_connected()
+
+    async def _wait_until_ready(self, timeout: float = 5.0) -> bool:
+        """Wait briefly for the first readable joint state."""
+        elapsed = 0.0
+        while not self.is_ready() and elapsed < timeout:
+            await asyncio.sleep(0.1)
+            elapsed += 0.1
+        return self.is_ready()
+
+    def _not_ready_message(self) -> str:
+        if self._node.is_connected():
+            return "PandaExecutor is connected but not accepting motion commands yet"
+        return (
+            "PandaExecutor is not ready: unable to connect to Panda "
+            f"at {self._node.get_connection_target()}"
+        )
+
+    async def _ensure_ready(self, timeout: float = 5.0) -> None:
+        if await self._wait_until_ready(timeout=timeout):
+            return
+        raise RuntimeError(self._not_ready_message())
 
     async def _wait_for_motion_start(self, timeout: float = 2.0) -> None:
         """Wait until the background motion thread is actually running."""
@@ -55,6 +70,20 @@ class PandaExecutor(Executor):
         while not self._node.is_moving() and elapsed < timeout:
             await asyncio.sleep(0.02)
             elapsed += 0.02
+
+    async def _wait_for_motion_finish(self, timeout: float) -> bool:
+        """Wait for the blocking franky move thread to finish."""
+        elapsed = 0.0
+        while self._node.is_moving() and elapsed < timeout:
+            await asyncio.sleep(self._motion_poll_interval)
+            elapsed += self._motion_poll_interval
+        return not self._node.is_moving()
+
+    def _validate_target_shape(self, target_rad: list[float]) -> None:
+        if len(target_rad) != 7:
+            raise ValueError(
+                f"PandaExecutor.move_joint expected 7 target joints, got {len(target_rad)}"
+            )
 
     async def move_joint(
         self,
@@ -77,21 +106,25 @@ class PandaExecutor(Executor):
         Returns:
             True if motion completed within tolerance, False on timeout.
         """
+        self._validate_target_shape(target_rad)
+        await self._ensure_ready()
+
         logger.info(f"PandaExecutor: Starting movej to {target_rad}")
 
         self._node.send_movej(target_rad, accel=acceleration, vel=velocity)
 
         # Wait for the motion thread to start before polling
         await self._wait_for_motion_start()
+        if not self._node.is_moving():
+            last_error = self._node.get_last_error()
+            raise RuntimeError(last_error or "Panda joint motion did not start")
 
-        # Poll until target reached or timeout
-        elapsed = 0.0
-        while elapsed < timeout:
-            if self._node.joints_at_target(target_rad, tolerance=tolerance_rad):
-                logger.info("PandaExecutor: Joint target reached")
-                return True
-            await asyncio.sleep(self._motion_poll_interval)
-            elapsed += self._motion_poll_interval
+        if await self._wait_for_motion_finish(timeout):
+            last_error = self._node.get_last_error()
+            if last_error:
+                raise RuntimeError(last_error)
+            logger.info("PandaExecutor: Joint motion finished")
+            return True
 
         logger.error(f"PandaExecutor: Joint move timeout after {timeout}s")
         return False
@@ -115,38 +148,24 @@ class PandaExecutor(Executor):
         Returns:
             True if motion completed (joints stable), False on timeout.
         """
+        await self._ensure_ready()
+
         logger.info(f"PandaExecutor: Starting movel to {pose}")
 
         self._node.send_movel(pose, accel=acceleration, vel=velocity)
 
-        # Wait for the motion thread to start before polling stability
+        # Wait for the motion thread to start before polling completion
         await self._wait_for_motion_start()
+        if not self._node.is_moving():
+            last_error = self._node.get_last_error()
+            raise RuntimeError(last_error or "Panda linear motion did not start")
 
-        # Detect completion by waiting for joints to stop moving
-        elapsed = 0.0
-        prev_joints = None
-        stable_count = 0
-        stable_threshold = 3
-
-        while elapsed < timeout:
-            await asyncio.sleep(self._motion_poll_interval)
-            elapsed += self._motion_poll_interval
-
-            current = self._node.get_joint_positions()
-            if current is None:
-                continue
-
-            if prev_joints is not None:
-                max_diff = max(abs(c - p) for c, p in zip(current, prev_joints))
-                if max_diff < 0.001:
-                    stable_count += 1
-                    if stable_count >= stable_threshold:
-                        logger.info(f"PandaExecutor: Linear move complete (stable for {stable_count} polls)")
-                        return True
-                else:
-                    stable_count = 0
-
-            prev_joints = current
+        if await self._wait_for_motion_finish(timeout):
+            last_error = self._node.get_last_error()
+            if last_error:
+                raise RuntimeError(last_error)
+            logger.info("PandaExecutor: Linear motion finished")
+            return True
 
         logger.error(f"PandaExecutor: Linear move timeout after {timeout}s")
         return False

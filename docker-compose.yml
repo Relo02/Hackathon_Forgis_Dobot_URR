@@ -30,20 +30,9 @@ services:
     command: bash scripts/start_driver.sh
     restart: unless-stopped
 
-  # ── FRANKA PANDA Driver ──────────────────────────────────────
-  # Enable with: docker compose --profile panda up
-  # Or set COMPOSE_PROFILES=panda in .env
-  panda-driver:
-    profiles: [panda]
-    build: ./assets/panda-driver
-    container_name: panda-driver
-    network_mode: host
-    ipc: host
-    environment:
-      - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
-    env_file: .env
-    command: bash scripts/start_driver.sh
-    restart: unless-stopped
+  # ── FRANKA PANDA ─────────────────────────────────────────────
+  # Panda is controlled directly from the backend via franky-control.
+  # There is no separate panda-driver container.
 
   # ── Backend Application ──────────────────────────────────────
   # Runs RobotNode + PickAndPlacePipeline + FastAPI flow execution API.
@@ -53,10 +42,16 @@ services:
     container_name: forgis-backend
     network_mode: host
     ipc: host
+    cap_add:
+      - SYS_NICE
+    ulimits:
+      rtprio: 99
+      memlock: -1
     ports:
       - "8000:8000"  # FastAPI (Note: ignored when network_mode: host on Linux)
     environment:
       - ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-0}
+      - ROBOT_TYPE=${ROBOT_TYPE:-ur}
       - FLOWS_DIR=/app/flows
       - YOLO_MODEL=${YOLO_MODEL:-/app/weights/roboflow_logistics.pt}
       - ROBOT_TCP_OFFSET=${ROBOT_TCP_OFFSET:-0,0,0.055,0,0,0}

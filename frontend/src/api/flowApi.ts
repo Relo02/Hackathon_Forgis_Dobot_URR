@@ -1,5 +1,6 @@
 import { postJson } from "./httpClient";
 import type { Flow } from "@/types";
+import { toBackendFlow } from "@/services/flowSerializationService";
 
 export async function generateFlow(prompt: string): Promise<Flow> {
   return postJson<Flow>("/flows/generate", { prompt });
@@ -7,6 +8,10 @@ export async function generateFlow(prompt: string): Promise<Flow> {
 
 export async function startFlow(flowId: string): Promise<void> {
   await postJson(`/flows/${flowId}/start`);
+}
+
+export async function saveFlow(flow: Flow): Promise<void> {
+  await postJson("/flows", toBackendFlow(flow));
 }
 
 export async function pauseFlow(): Promise<void> {

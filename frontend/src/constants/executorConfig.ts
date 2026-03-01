@@ -23,4 +23,14 @@ export const TASKS = [
   { value: "object_detection", label: "Object Detection" },
 ] as const;
 
-export const EMPTY_CREATOR: NodeCreatorState = { nodeType: null, task: null, label: "" };
+export const MOTION_TYPES = [
+  { value: "joint", label: "Joint Motion" },
+  { value: "linear", label: "Linear Motion" },
+] as const;
+
+export const EMPTY_CREATOR: NodeCreatorState = {
+  nodeType: null,
+  task: null,
+  motionType: null,
+  label: "",
+};
