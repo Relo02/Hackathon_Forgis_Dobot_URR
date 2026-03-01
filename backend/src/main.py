@@ -13,6 +13,7 @@ from executors import IOExecutor, RobotExecutor, PandaExecutor, CameraExecutor, 
 from flow.manager import FlowManager
 from nodes.ur_node import RobotNode
 from nodes.dobot_nova5_node import DobotNova5Node
+from nodes.panda_node import PandaNode
 from nodes.camera_node import CameraNode
 from nodes.camera_bridge_node import CameraBridgeNode
 from nodes.covvi_hand_node import CovviHandNode
@@ -45,8 +46,15 @@ def main():
     robot_type = os.environ.get("ROBOT_TYPE", "ur").lower()
     logger.info(f"Robot type: {robot_type}")
 
-    # ROS 2 robot node + executor (type-switched)
-    if robot_type == "dobot":
+    # Robot node + executor (type-switched).
+    # PandaNode wraps frankapy (ROS 1) and is a plain Python object —
+    # it must NOT be added to the ROS 2 executor.
+    if robot_type == "panda":
+        robot = PandaNode()
+        robot_executor = PandaExecutor(robot)
+        io_robot_executor = None
+        logger.info("Using Franka Panda (frankapy)")
+    elif robot_type == "dobot":
         robot = DobotNova5Node()
         robot_executor = DobotNova5Executor(robot)
         io_robot_executor = None  # DOBOT I/O can be wired later
@@ -88,9 +96,11 @@ def main():
     # FastAPI application
     app = create_app(flow_manager, ws_manager, robot, camera_executor, io_robot_executor, hand_executor)
 
-    # ROS 2 executor with nodes
+    # ROS 2 executor with nodes.
+    # PandaNode is not an rclpy Node — skip adding it.
     ros_executor = MultiThreadedExecutor()
-    ros_executor.add_node(robot)
+    if robot_type != "panda":
+        ros_executor.add_node(robot)
     ros_executor.add_node(camera)
     ros_executor.add_node(camera_bridge)
     ros_executor.add_node(hand)
@@ -119,7 +129,8 @@ def main():
     finally:
         logger.info("Shutting down...")
         ros_executor.shutdown()
-        robot.destroy_node()
+        if robot_type != "panda":
+            robot.destroy_node()
         camera.destroy_node()
         camera_bridge.destroy_node()
         hand.destroy_node()
